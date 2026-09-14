@@ -135,6 +135,8 @@ Each step contains one directive. A failed directive stops the flow.
 
 A `type` step can contain a `{{secret:NAME}}` placeholder. The tool-server fills the value at run time and redacts the value in the report. See [Secrets](/docs/reference/configuration#secrets).
 
+A step can read a value that an earlier script returned, with an `{{output:…}}` reference. See [Script output](#script-output).
+
 A gesture that resolves no selector passes with a warning when the runner cannot read the UI tree. This covers a coordinate `tap`, a `swipe` with no selector at either end, and a `pinch` or `rotate` without `on`. The warning says that Argent sent the gesture, not that the gesture reached the element.
 
 ### Launch map
@@ -278,15 +280,17 @@ Use a `script` step for setup or cleanup that device steps cannot do. The script
 
 An `.mjs` file runs under Node.js. A `.sh` file runs under Bash. See [Bash scripts](#bash-scripts).
 
+A script can return an output document. A later step reads values from the document. See [Script output](#script-output).
+
 A `script` step needs no device. A flow of script steps alone runs with no simulator, emulator or browser, and the report names no device. A `run` step or a `when` step beside it makes the flow resolve one again, so a script inside a `when: { platform: ios }` block needs a booted iOS device.
 
 The value is always a map. Parsing rejects a bare path, such as `script: scripts/seed-order.sh`.
 
-| Key       | Required | Description                                                                                                                                |
-| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `path`    | yes      | An `.mjs` or `.sh` file, relative to the flow file that holds the step. Use a lowercase extension. Match the letter case on disk           |
-| `timeout` | no       | The time limit of the step in milliseconds. The minimum is 100, and the default is 30000                                                   |
-| `env`     | no       | Environment values for this script. See [Environment values](#environment-values)                                                           |
+| Key       | Required | Description                                                                                                                      |
+| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `path`    | yes      | An `.mjs` or `.sh` file, relative to the flow file that holds the step. Use a lowercase extension. Match the letter case on disk |
+| `timeout` | no       | The time limit of the step in milliseconds. The minimum is 100, and the default is 30000                                         |
+| `env`     | no       | Environment values for this script. See [Environment values](#environment-values)                                                |
 
 Argent runs the script with the project root as the working directory. Argent gives the script an allowlist of environment names. Argent copies each value from the tool-server, not from the shell that starts the run. The tool-server is a long-lived process, so the values are the ones it held when it started. A variable you export now reaches a script only after you restart the tool-server. See [Environment variables](/docs/reference/configuration#environment-variables). The allowlist holds these groups:
 
@@ -360,6 +364,8 @@ Start the script with `set -euo pipefail` to stop on command failures and undefi
 
 Stop each background job by its process ID before the script exits. Do not use `trap 'kill 0' EXIT`; it can stop Bash itself.
 
+To return an output document, write the document to the file that `$ARGENT_OUTPUT` names. See [Output document](#output-document).
+
 #### Check failures
 
 A nonzero exit code fails the step. The failure reason includes the exit code and the last non-blank line from stderr. Argent includes stdout only in the log, not in the reason.
@@ -398,7 +404,19 @@ Override defaults with `argent flow run <name> --env NAME=value` or `flow-execut
 
 A `run:` inherits values; its defaults apply only inside that flow. A raw `tool: flow-execute` starts a separate run: pass values in `args.env`.
 
-Use string values; quote numbers and booleans. Names must match `[A-Za-z_][A-Za-z0-9_]*`; on Windows, avoid names that differ only in case. Reserved names and script output references are rejected.
+Each value in `args.env` is an `args` value. The parent run resolves its [output references](#output-references) before the call. Thus a child run gets a value from the output document of the parent run. The child run rejects a resolved `args.env` value that contains the literal text `{{output:`.
+
+Use string values; quote numbers and booleans. Names must match `[A-Za-z_][A-Za-z0-9_]*`; on Windows, avoid names that differ only in case. Argent rejects a reserved name.
+
+Each channel treats an [output reference](#output-references) differently:
+
+| Channel                                     | `{{output:…}}` reference                                   |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `env` of a `script` step                    | Argent resolves the reference, then each `{{secret:NAME}}` |
+| Top-level `env`                             | Argent rejects the reference                               |
+| Run values (`--env`, `env` of flow-execute) | Argent rejects the reference                               |
+
+Argent resolves the top-level `env` and the run values before the first script starts. At that time, no output document exists.
 
 Add top-level `env` after recording. Save it before re-recording: `flow-start-recording` clears the whole file.
 
@@ -408,9 +426,232 @@ Use `{{secret:NAME}}` for credentials; configure them in the tool-server's [secr
 
 Argent redacts resolved secrets in script failures and logs, but not every encoding. Plaintext `env` values and returned output documents remain visible. Do not put credentials in logs or output documents.
 
+The output document is not secret storage. Argent does not redact the output document. Step reports do not show the document, but a value from the document can appear in these places:
+
+- An `echo` message that prints the value
+- The log of a later script
+- The failure reason of a step that resolved the value
+- The `env` of a later script. Argent does not treat a resolved reference in `env` as a secret
+
 ### Inheriting host variables
 
 [`scripts.env.allow`](/docs/reference/configuration#available-keys) adds names inherited from the tool-server. A later shell `export` does not update it. For a missing value or command, pass the value or `PATH` through `env`, or restart the tool-server with the required environment.
+
+## Script output
+
+A `script` step can return an output document. A later step reads a value from the output document with a reference:
+
+```yaml
+steps:
+  - script:
+      path: ../../scripts/create-user.mjs
+  - type:
+      into: { id: user-name }
+      text: "{{output:user.displayName}}"
+  - echo: "Created user {{output:user.id}}"
+```
+
+### Output document
+
+The output document is a JSON object. The flow runner keeps one output document for each run. The document is empty when the run starts.
+
+| Step                 | Output document                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `run:`               | The fragment uses the document of the flow that runs it. The document keeps what its scripts wrote |
+| `when`               | The nested steps use the document of the flow. The document keeps what their scripts wrote         |
+| `tool: flow-execute` | The step starts a separate run with its own, empty document                                        |
+
+The `env` map works differently. The `env` defaults of a fragment apply only inside that fragment. See [Environment values](#environment-values).
+
+A `.mjs` script reads and writes the document as the `output` global. The script can change the object or assign a new object:
+
+```js
+// Change the document
+output.user = user;
+
+// Assign a new document
+output = { user, orderId };
+```
+
+A `.sh` script reads and writes the document as a file. The `ARGENT_OUTPUT` variable holds the path of the file. The file holds the document when the script starts. The script writes its document back to the file. To add a key with `jq`, write a second file and move it over the first file:
+
+```bash
+jq --argjson user "$user" '. + {user: $user}' "$ARGENT_OUTPUT" > "$ARGENT_OUTPUT.new" \
+  && mv "$ARGENT_OUTPUT.new" "$ARGENT_OUTPUT"
+```
+
+Do not redirect a command into `$ARGENT_OUTPUT` when the command also reads the file. The shell empties the file before the command reads it.
+
+### Merge rule
+
+After a script step passes, Argent merges the returned document into the output document:
+
+```text
+new document = { ...current document, ...returned document }
+```
+
+- A top-level key that the script writes replaces the whole value of that key.
+- A top-level key that the script does not write keeps its value.
+- A script cannot remove a top-level key. To clear a value, set the key to `null`.
+- When the script step fails or errors, Argent ignores the whole returned document.
+
+For example, a `.sh` script writes only an `order` key. The `user` key from an earlier `.mjs` script keeps its value. The opposite order gives the same result.
+
+### Document limits
+
+| Limit   | Rule                                                                                |
+| ------- | ----------------------------------------------------------------------------------- |
+| Size    | At most 1 MiB encoded. The limit applies to each returned document and to the merge |
+| Depth   | At most 4096 levels                                                                 |
+| Numbers | Finite numbers only                                                                 |
+| Keys    | No own `__proto__` key                                                              |
+
+A merge past the size limit fails the step. The failure reason names the size and the limit.
+
+In a `.mjs` script, Argent converts the `output` value to JSON:
+
+- Argent drops a member that is `undefined`. For example, `output.promo = user.promo?.code` adds no `promo` key for a user without a promo.
+- Argent changes an `undefined` array element to `null`.
+- A function, a symbol, a BigInt, a `Date`, a `Map`, a `Set`, a class instance, `NaN`, `Infinity` or a cycle fails the step.
+
+JSON numbers lose precision:
+
+- Argent can round an integer larger than 9007199254740991.
+- A decimal such as `9.90` returns as `9.9`.
+
+The step still passes. When a script writes an integer larger than 9007199254740991, the step report carries a warning. The warning names the path of the first such integer. Write identifiers, prices and codes as strings.
+
+### Output references
+
+A reference reads a value from the output document. The reference starts with `{{output:` and ends with `}}`:
+
+```yaml
+- type: { into: { id: promo }, text: "{{output:user.promo.code ?? 'NONE'}}" }
+- echo: "Region {{output:user.region ?? defaults.region ?? 'unknown'}}"
+- tool: keyboard
+  args: { text: "{{output:codes[0]}}" }
+- echo: "Order {{output:order['order-id']}}"
+```
+
+The grammar of a reference:
+
+```text
+reference    := "{{output:" path ( "??" operand )* "}}"
+operand      := path | literal
+path         := segment ( "." segment | "[" index "]" | "[" string "]" )*
+segment      := [A-Za-z_][A-Za-z0-9_]*
+index        := "0" | [1-9][0-9]*
+literal      := string | number | "true" | "false" | "null"
+string       := "'" chars "'" | '"' chars '"'     (a backslash escapes the next character)
+number       := a JSON number
+```
+
+- Whitespace can appear between tokens. A path and a number cannot contain whitespace.
+- An index other than `0` cannot start with `0`.
+- The first operand is always a path. A path always starts with a name. Thus a reference reads only a top-level key that is a name.
+- `true`, `false` and `null` are literals, not paths. Use brackets for a key with one of these names, or a key that is not a name: `flags["null"]`, `order["order-id"]`.
+- The first `}}` ends a reference. Thus a literal cannot contain `}}`.
+- `{{ output:x }}`, `{{Output:x}}` and other near spellings are not references. Argent keeps them as literal text and does not report them.
+
+An operand after `??` is a fallback. `??` is the only operator. A reference cannot calculate a value:
+
+- No concatenation or arithmetic
+- No length, condition or function call
+- No object literal, array literal or parentheses
+
+Calculate the value in the script.
+
+Put quotation marks around a value that holds a reference. YAML reads an unquoted `echo: {{output:user.id}}` as a map. Argent rejects the file and asks for quotation marks.
+
+Argent checks the syntax of each reference when it parses the flow file. Argent parses a `run:` fragment only when its step starts. Thus a malformed reference in a fragment stops the run at that step, after the earlier scripts ran.
+
+### Reference resolution
+
+Argent tries the operands from left to right:
+
+- A path gives a value when every segment exists and the value is not `null`.
+- A literal always gives a value.
+
+A path reads only JSON data: an own key of an object or an element of an array. These are missing paths:
+
+- A name that is not an own key, such as `name.length`, `codes.length` or `user.constructor`
+- A key on an array, or an index on an object
+- An index past the last element
+- A segment below a string, a number or a boolean
+
+A fallback applies to each missing path. A script does not need to write every key, or write `null` for a missing value. For example, `{{output:promo.code ?? 'none'}}` handles a key that the script never wrote.
+
+When no operand gives a value, Argent stops the step with an error. The reason names the field, the path and the segment where Argent stopped, for example `` `output.user` has no `promo` ``. When Argent stops on an object, the reason lists the first keys of that object. In a `when` guard, this error stops the run. The guard does not report "condition not met".
+
+Argent resolves each field one time, directly before its step runs. A skipped step resolves nothing. Argent does not read a resolved value again for references. Thus a value from the document can contain the literal text `{{output:`.
+
+### Reference fields
+
+Argent resolves references in these fields:
+
+- `echo` messages
+- The `text`, `id` and `role` of a selector, also inside a relational scope such as `within`
+- The selectors and the expected text of a `when` guard
+- The `text` of a `type` step
+- The expected text of `contains` and `equals`
+- String values inside the `args` of a `tool` step, except the static fields below
+- The `env` values of a `script` step
+
+Argent rejects a reference in these static fields when it parses the file:
+
+- The `path` of a `script` step and the path of a `run` step
+- A `launch` value
+- A snapshot name
+- `executionPrerequisite`
+- The tool name of a `tool` step
+- Each `matches` pattern
+- The `flow_path`, `project_root`, `name` and `flow_file` arguments of `tool: flow-execute`
+- Each `tool` name in the `steps` of `tool: run-sequence`
+
+### Value types
+
+In the `args` of a `tool` step, a value that is one whole reference keeps its JSON type:
+
+- A number stays a number.
+- An object stays an object.
+- A final `?? null` gives JSON `null`.
+
+The tool can reject that type. For example, `tool: keyboard` rejects a number in `text`, but a `type` step converts the same number to text. The failure reason then tells you to write the value as a string in the script, or to use a `type` step.
+
+In every other field, Argent converts the value to text. Argent also converts an `args` value that has other text around the reference.
+
+| Resolved value              | In an `echo`          | In another field |
+| --------------------------- | --------------------- | ---------------- |
+| A string, number or boolean | Text                  | Text             |
+| An object, array or `null`  | Compact one-line JSON | An error         |
+
+Argent cuts a resolved `echo` message at 65,536 characters. Argent ends the cut message with `…(+N chars)`.
+
+These fields need a value and reject an empty result:
+
+- The `text` of a selector. The text needs a visible character.
+- The `id` and `role` of a selector
+- The expected text of `contains` and `equals`
+- The `text` of a `type` step
+
+Thus `?? ''` is correct in an `echo`, next to other text, and in `args`. Do not use `?? ''` as the full value of a field in this list. Use a literal that fits the field.
+
+### References and secrets
+
+Write each `{{secret:NAME}}` placeholder whole in the flow file. A placeholder next to a reference resolves as usual. Argent stops the step in these cases:
+
+- A resolved value supplies a character of a placeholder. For example, two values each hold one half of a placeholder.
+- A whole-field `args` reference gives an object that holds a placeholder string.
+
+### Step reports
+
+- An `echo` report and the echo line of `argent flow run` show the resolved message.
+- The report of every other step keeps each reference as written. The report keeps `{{secret:NAME}}` in the same way.
+- When a step that resolved references fails or errors, the reason ends with each resolved value, for example `(output.order.id = 42)`.
+
+### Record script output
+
+Argent keeps one output document for each recording. `flow-add-script` gives each script that document. `flow-add-script` merges a passing document with the [merge rule](#merge-rule). Thus a second recorded script reads the keys of the first script, as it does at replay. The `env` of `flow-add-script` and the `args` of `flow-add-step` can hold references. Argent resolves them against the recording document for the live call. Argent saves the reference in the flow file, not the value. A reference that does not resolve stops the call, and Argent records no step. `flow-add-echo` records a message that does not resolve yet, and adds a warning to its result.
 
 ## The `argent flow` command
 
@@ -430,7 +671,7 @@ Argent redacts resolved secrets in script failures and logs, but not every encod
 | `--update-baselines` | Write the snapshot baselines instead of comparing them                                                                                                            |
 | `--output <dir>`     | Write the failed baseline, current and diff images to `<dir>/<flow>/`, for a CI artifact upload                                                                   |
 | `-r, --recursive`    | With a directory, also run the flows in subdirectories. Dot-directories and `node_modules` are skipped                                                            |
-| `--env <NAME=value>` | Set a script environment value for this run. Repeat for each variable. See [Environment values](#environment-values)                                                |
+| `--env <NAME=value>` | Set a script environment value for this run. Repeat for each variable. See [Environment values](#environment-values)                                              |
 | `--json`             | Print the JSON report of the flow, or the JSON aggregate of the directory                                                                                         |
 | `--json-stream`      | Print one JSON record per line: each step, then the result. One flow, and not with `--json`                                                                       |
 | `--`                 | End of options, for a flow name that starts with `-`                                                                                                              |
@@ -476,4 +717,4 @@ The `flow-execute` tool takes one flow source: `name` for a saved flow, or `flow
 
 ## YAML safety
 
-Quote a string that contains `#`, `:` or quotes. Quote a number, `true` or `false` in a text slot. Use single quotes for a regex with backslashes. Parsing rejects an unknown directive, an invalid selector, an invalid regex, `else`, an unsupported option, and an end-to-end flow that declares `executionPrerequisite`.
+Quote a string that contains `#`, `:` or quotes. Quote a value that holds an `{{output:…}}` reference. Quote a number, `true` or `false` in a text slot. Use single quotes for a regex with backslashes. Parsing rejects an unknown directive, an invalid selector, an invalid regex, `else`, an unsupported option, and an end-to-end flow that declares `executionPrerequisite`.
