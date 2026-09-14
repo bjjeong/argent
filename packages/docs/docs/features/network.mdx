@@ -67,7 +67,7 @@ Argent removes the bundle traffic and the HMR traffic of Metro from the record. 
 - Argent starts the capture at one of these three moments: the debugger connects, Argent attaches to the Chromium app, or you activate the native inspection. Argent does not capture the earlier requests. Do the operation again after the agent connects.
 - The record keeps the most recent requests only. The JS and Android native layers keep 2000 requests. Chromium keeps 1000 requests. For native iOS, the limit is 1000 protocol events. A request produces several events, so the native record holds fewer than 1000 requests.
 - For Chromium, Argent reads the active tab. If you change the tab, Argent attaches to the new tab. If the page changed after the request, the body of the response can be unavailable.
-- Android native capture can miss startup requests. In an app that was already running, it can also miss requests of some native modules. Restart the app to capture them.
+- Android native capture can miss startup requests. It can also miss requests of some native modules.
 - For WebSockets, Android native capture records only the connection request.
 - On Android, older request bodies can become unavailable. Argent cannot read earlier bodies after the app stops or an emulator snapshot loads.
 - Android native inspection can slow the app. Before profiling, stop the Argent services for the device. Then restart the app.
