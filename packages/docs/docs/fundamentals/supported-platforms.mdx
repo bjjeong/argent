@@ -33,6 +33,14 @@ iOS simulators and Android emulators or devices are driven with taps, swipes, pi
   caption="The same interaction model on a physical Pixel connected over adb"
 />
 
+On a physical Android device, Argent starts a screen-sharing agent on the device over adb. Argent stops this agent when the session ends or when the connection to the device stops. The agent can stay active if the host process stops abruptly:
+
+- The user or the system sends a kill signal to the host process.
+- The host computer goes to sleep.
+- The user disconnects the cable.
+
+To stop the agent manually, run `adb -s <serial> shell pkill -f 'screensharing[.]Main'`. This command also stops the device mirror of Android Studio.
+
 ### Physical iPhones
 
 Argent also drives a physical iPhone over a USB cable. Physical iPads are not supported yet. Automation on hardware is scoped to one app at a time, and a subset of the simulator tools is available. See [Physical iOS devices](/docs/features/physical-ios-devices).
