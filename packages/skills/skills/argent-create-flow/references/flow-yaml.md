@@ -281,7 +281,9 @@ Read values with `process.env.NAME` in `.mjs` or `$NAME` in `.sh`. Override defa
 
 A `run:` inherits values; its defaults apply only inside that flow. A raw `tool: flow-execute` starts a separate run: pass values in `args.env`.
 
-Use string values; quote numbers and booleans. Top-level `env`, `--env` and `flow-execute`'s `env` reject `{{output:…}}` references, because they resolve before any script runs. A script step's own `env` resolves [output references](#references) first, then `{{secret:NAME}}`. Each `args.env` value of a raw `tool: flow-execute` step resolves in the parent run: this is how a child run gets a value from the parent's output document. The child run rejects a resolved value that contains the literal text `{{output:`.
+Use string values; quote numbers and booleans. Use [output references](#references) in `script.env`. Output references are not supported in top-level `env`, `--env`, or the `flow-execute` parameter `env`.
+
+To pass parent output to a `tool: flow-execute` step, use references in `args.env`.
 
 Use `{{secret:NAME}}` for credentials. Ask the user to configure missing secrets by name, never to provide their values. Plaintext `env` values and returned output documents are not redacted. Do not put credentials in logs or output documents.
 
@@ -289,59 +291,39 @@ Use `{{secret:NAME}}` for credentials. Ask the user to configure missing secrets
 
 ## Script output
 
-A script step can return an output document. Later steps read it with `{{output:…}}` references.
+A script can return data for later steps. Use `{{output:path}}` to read it:
 
 ```yaml
 - script: { path: ../../scripts/create-user.mjs }
 - type: { into: { id: user-name }, text: "{{output:user.displayName}}" }
-- type: { into: { id: promo }, text: "{{output:user.promo.code ?? 'NONE'}}" }
-- echo: "Region {{output:user.region ?? defaults.region ?? 'unknown'}}"
-- tool: keyboard
-  args: { text: "{{output:codes[0]}}" }
-- echo: "Order {{output:order['order-id']}}"
+- echo: "Promo {{output:user.promo.code ?? 'NONE'}}"
 ```
 
 ### The output document
 
-- Each run has one document: a JSON object that starts empty. `run:` fragments and `when` blocks use the document of the flow that runs them and keep what their scripts wrote, unlike `env` defaults. A `tool: flow-execute` step starts a separate run with its own empty document.
-- In `.mjs`, the document is the `output` global. Change it (`output.user = user;`) or assign a new object (`output = { user, orderId };`).
-- In `.sh`, `$ARGENT_OUTPUT` names a file that holds the document when the script starts. Write the document back to that file. Never redirect a command into the file it reads, because the shell empties the file first. Write a second file and move it:
-
-  ```bash
-  jq --argjson user "$user" '. + {user: $user}' "$ARGENT_OUTPUT" > "$ARGENT_OUTPUT.new" \
-    && mv "$ARGENT_OUTPUT.new" "$ARGENT_OUTPUT"
-  ```
-
-- After a script step passes, Argent merges `{ ...current, ...returned }`. A top-level key the script writes replaces that key's whole value. A key it does not write keeps its value, so a `.sh` that writes only `order` keeps the `user` an earlier `.mjs` wrote, and the opposite order works too. A script cannot remove a key: set it to `null`. A failed or errored step's document is ignored.
-- Limits: 1 MiB encoded for each script's document and for the merged document (a merge past it fails the step), 4096 levels, finite numbers, no own `__proto__` key. In `.mjs`, an `undefined` member is dropped and an `undefined` array element becomes `null`. A function, symbol, BigInt, Date, Map, Set, class instance, NaN, Infinity or cycle fails the step.
-- JSON can round an integer above 9007199254740991 (the step passes with a warning naming the first path) and returns `9.90` as `9.9`. Have scripts write ids, prices and codes as strings.
-- The document is not secret storage, and Argent never redacts it. An `echo` can print a value from it, a later script's log can hold one, and a resolved value in a later script's `env` is not treated as a secret.
+- In `.mjs`, read or change the `output` object, for example `output.user = { displayName: "Test user" };`.
+- In `.sh`, write a JSON object to the file at `$ARGENT_OUTPUT`. The file initially contains the current document. If a command also reads this file, write to a second file first. Then move the second file to `$ARGENT_OUTPUT`.
+- Each run starts with an empty document. Nested `run:` flows and `when` blocks share it. A `tool: flow-execute` step has a separate document.
+- After a successful script, each returned top-level key replaces its previous value, including nested values. Other keys keep their values. To clear a key, set it to `null`. Failed scripts do not update the document.
+- Use JSON values. Keep the combined document and each script's output at or below 1 MiB. Use strings for identifiers, prices and codes.
 
 ### References
 
-- Syntax: `{{output:`, a path, any number of `?? operand` fallbacks, then `}}`. A path starts with a name and continues with `.name`, `[0]`, `['key']` or `["key"]`. An operand is a path or a literal: a quoted string (a backslash escapes the next character), a JSON number, `true`, `false` or `null`. Whitespace is allowed between tokens, not inside a path or a number. An index other than `0` cannot start with `0`.
-- `true`, `false` and `null` are literals. Read a key with one of those names, or a key that is not a name, with brackets: `flags["null"]`, `order["order-id"]`. A top-level key must be a name. The first `}}` ends the reference, so a literal cannot contain `}}`.
-- `{{ output:x }}`, `{{Output:x}}` and other near spellings are not references. They stay literal text, and nothing reports them.
-- `??` is the only operator. There is no concatenation, arithmetic, length, condition, function call, object or array literal, or parentheses. Compute values in the script.
-- Always quote a value that holds a reference. An unquoted `echo: {{output:user.id}}` is a YAML map, and the file is rejected.
-- Operands are tried left to right. A path gives a value when every segment exists as JSON data (an own key or an array element) and the value is not `null`. `name.length`, `user.constructor`, a key on an array, an index on an object, an index past the end and a segment under a string, number or boolean are missing paths, and `??` covers them. Prefer `{{output:promo.code ?? 'none'}}` over making a script write every key.
-- If no operand gives a value, the step errors. The reason names the field, the path and the segment where it stopped, such as `` `output.user` has no `promo` ``. In a `when` guard, this errors the run instead of skipping the block.
-- Each field resolves once, right before its step. A skipped step resolves nothing. A resolved value is never scanned for references again.
-- Reference fields: `echo` messages; selector `text`, `id` and `role`, scopes included; `when` guard selectors and expected text; `type` text; `contains` and `equals` text; string values in `tool` `args`; a script step's `env`. Parse rejects a reference in script and `run` paths, `launch` values, snapshot names, `executionPrerequisite`, a `tool` step's tool name, any `matches` pattern, the `flow_path`, `project_root`, `name` and `flow_file` of `tool: flow-execute`, and the `tool` names in `tool: run-sequence` steps.
-- Types: a value in `args` that is one whole reference keeps its JSON type, and a final `?? null` passes JSON `null`. The tool can reject that type: `tool: keyboard` rejects a number in `text`, so have the script write a string, or use a `type:` step. Everywhere else, including an `args` value with other text around the reference, a string, number or boolean becomes text. An object, array or `null` is an error there, except in `echo`, which prints compact one-line JSON. Argent cuts a resolved echo message at 65,536 characters.
-- Selector `text` (needs a visible character), `id`, `role`, `contains` and `equals` text, and `type` text reject an empty result. Use `?? ''` only in `echo`, next to other text, or in `args`. Elsewhere pick a literal that fits the field.
-- Write each `{{secret:NAME}}` whole in the file. A resolved value that supplies any character of a placeholder stops the step, and so does a whole-field `args` object that holds one.
-- Step reports keep references as written, except `echo`, which shows the resolved message. A failure reason ends with each resolved value, such as `(output.order.id = 42)`.
-- Parse checks every reference. A `run:` fragment is parsed only when its step starts, so a malformed reference there stops the run after earlier scripts already ran.
+- Use paths such as `user.name`, `codes[0]` or `order['order-id']`. Quote YAML values that contain references.
+- Use `??` for a missing or `null` value, for example `{{output:user.region ?? defaults.region ?? 'unknown'}}`. If no alternative supplies a value, the run stops, including in a `when` condition. Calculate other values in the script.
+- References work in `echo`, selector `text`/`id`/`role`, `type.text`, `contains`/`equals`, `tool.args` values and `script.env`. Selector scopes and `when` conditions also accept them.
+- Keep paths, launch values, snapshot names, prerequisites, tool names and `matches` patterns literal. This includes flow identity arguments in `tool: flow-execute` and tool names inside `tool: run-sequence`.
+- In `tool.args`, a field that contains only one reference keeps the referenced value's JSON type. Match the tool parameter's type. For example, `keyboard.text` needs a string. A `type` step converts a referenced number to text.
+- Other fields accept strings, numbers and booleans as text. Only `echo` can also print objects, arrays and `null`. Selectors, text checks and `type` need nonempty values; avoid `?? ''` as their complete value.
+- Write secret placeholders directly in the flow file. Do not build them from output values. Output values can appear in logs and failure reports.
 
 ### Recording script output
 
-- `flow-add-script` runs each script with the recording's own document and merges a passing result with the same rule. A second recorded script therefore reads the first one's keys, as it will at replay. `outputJson` in the result shows the returned document.
-- `flow-add-script`'s `env` accepts references. They resolve against the recording's document for the live run, and the file saves the reference, not the value. An unresolved reference stops the call before the script runs, and nothing is recorded. For example, record `scripts/login.sh`, which writes `output.auth.token`. Then record `scripts/create-order.sh` with `env: { TOKEN: "{{output:auth.token}}" }`.
-- `flow-add-step` resolves `args` references before the tool runs. An unresolved reference stops the call before the device acts.
-- `flow-add-echo` records a message that does not resolve yet, and `message` carries a warning.
-- Two recording calls that run at the same time can start from the same document. The call that appends second warns in `message`. Its step is already in the file, so calling it again appends a second step.
-- When `flow-add-step` records a `flow-execute` call as a `run:` step and the fragment has a script step or a reference, the result warns. The live call started with an empty document, so replay can differ.
+1. Record the script with `flow-add-script`. Its `outputJson` result shows the returned data.
+2. Use references in later `flow-add-script.env` or `flow-add-step.args` values. Argent resolves them for the call and saves them for replay. An unresolved reference prevents execution and recording.
+3. Make recording calls one at a time. If a call warns that output changed, check the saved step before you retry.
+4. Check warnings from `flow-add-echo`: it can record an unresolved reference.
+5. Replay the final flow. A fragment recorded through `flow-execute` starts with its own output document during recording. Its saved `run:` step shares the parent document at replay.
 
 ## Snapshots and standalone runs
 
@@ -357,4 +339,4 @@ Pin `--platform` and `--device` for iOS, Android, or Vega. For Chromium the devi
 
 ## YAML safety
 
-Quote strings containing `#`, `:`, quotes, or an `{{output:…}}` reference. Quote numbers and `true` or `false` in text slots. Use single quotes for regexes with backslashes. Parsing rejects invalid directives, selectors, regexes, `else`, unsupported options, and e2e flows that also declare `executionPrerequisite`.
+Quote strings containing `#`, `:`, quotes, or `{{output:…}}`. Quote numbers and `true` or `false` in text slots. Use single quotes for regexes with backslashes. Parsing rejects invalid directives, selectors, regexes, `else`, unsupported options, and e2e flows that also declare `executionPrerequisite`.

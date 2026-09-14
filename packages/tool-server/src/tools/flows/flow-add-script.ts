@@ -57,7 +57,7 @@ const zodSchema = z.object({
         "Argent saves this map as the step's `env`. These values replace flow defaults and take priority over `--env` at replay. " +
         "For values that change per run, use the flow's top-level `env` instead. " +
         "Use `{{secret:NAME}}` for credentials; plaintext values remain visible in the flow file and tool logs. " +
-        "Use `{{output:path}}` for a value an earlier recorded script returned; Argent resolves it for this run and saves the reference, not the value."
+        "Use `{{output:path}}` to read an earlier recorded script's output. Argent saves the reference for replay."
     ),
 });
 
