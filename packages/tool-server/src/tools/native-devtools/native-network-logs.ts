@@ -84,6 +84,7 @@ Returns { status, count, events } on iOS, where each event contains URL, method,
 On Android, use a debuggable app on Android 8.0 or later (arm64-v8a or x86_64).
 Call this tool to start capture. When armed is true, repeat the action to capture its requests.
 Capture includes React Native requests, images and other OkHttp traffic. It can miss startup requests, and in an app that was already running it can miss requests of some native modules. restart-app captures those; launch-app and restart-app also resume capture.
+On Android, capture can slow the app. Before profiling, call stop-all-simulator-servers for this device, then restart-app.
 Pass an android-N ID from requests to view-network-request-details for headers and request or response bodies.
 Set port to the app's Metro port to exclude Metro traffic.
 When status is not_attachable, use view-network-logs. Do not retry native capture.
