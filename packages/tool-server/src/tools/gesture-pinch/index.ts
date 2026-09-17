@@ -88,7 +88,7 @@ export const gesturePinchTool: ToolDefinition<Params, Result> = {
 startDistance > endDistance = pinch in (zoom out). startDistance < endDistance = pinch out (zoom in).
 Typical values: startDistance 0.2, endDistance 0.6 for a zoom-in pinch at screen center.
 Auto-generates interpolated frames at ~60fps. The angle parameter controls the axis (0 = horizontal, 90 = vertical). Optional endCenterX/endCenterY drift the centroid linearly over the gesture (omitted = fixed center).
-Use when you need to zoom in or out on a map, image, or zoomable view. Returns { pinched: true, timestampMs }. Fails if the simulator-server / emulator backend is not reachable for the given device, or if the computed finger positions fall outside 0-1 — reduce the distance, move the center, or use endCenterX/endCenterY. Note a finger that merely lands NEAR an edge can still be grabbed by a system gesture (the Android notification shade sits at the top edge), so keep some margin.`,
+Use when you need to zoom in or out on a map, image, or zoomable view. Returns { pinched: true, timestampMs }. Fails if the simulator-server / emulator backend is not reachable for the given device.`,
   zodSchema,
   capability,
   services: (params) => ({
@@ -128,13 +128,9 @@ Use when you need to zoom in or out on a map, image, or zoomable view. Returns {
     if (offScreen) {
       const when = offScreen.frameIndex === 0 ? "at the start of" : "during";
       throw new InvalidToolInputError(
-        `gesture-pinch: finger ${offScreen.axis} = ${offScreen.value} ${when} the gesture is ` +
-          `off-screen (must be 0–1). centerX ${params.centerX} / centerY ${params.centerY} with ` +
-          `startDistance ${params.startDistance} at angle ${angleDeg} puts a finger ` +
-          `${describeOffScreenEdge(offScreen.axis, offScreen.value)} — the OS reads an off-screen ` +
-          `touch as a system gesture (on Android, the notification shade) instead of a pinch, so the ` +
-          `app never sees it. Reduce the distance, move the center, or set endCenterX/endCenterY to ` +
-          `drift the centroid inward as the fingers spread.`
+        `gesture-pinch: finger ${offScreen.axis} = ${offScreen.value} ${when} the gesture is off-screen ` +
+          `(${describeOffScreenEdge(offScreen.axis, offScreen.value)}); reduce the distance, move the ` +
+          `center, or set endCenterX/endCenterY.`
       );
     }
 

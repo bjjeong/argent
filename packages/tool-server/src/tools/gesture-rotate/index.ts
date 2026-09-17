@@ -95,7 +95,7 @@ export const gestureRotateTool: ToolDefinition<Params, Result> = {
 endAngle > startAngle = clockwise rotation. Typical values: radius 0.15, startAngle 0, endAngle 90 for a 90° clockwise turn. A single radius applies to both axes, so on a non-square screen it traces a physical ellipse (finger separation varies through the turn); pass radiusX+radiusY (fractions of width/height with radiusX·width = radiusY·height) for a physically circular orbit instead.
 Auto-generates interpolated frames at ~60fps.
 Unlike gesture-pinch which moves fingers linearly to zoom, this orbits fingers in an arc to change orientation.
-Use when you need to rotate a map, image picker, or any rotateable UI element. Returns { rotated: true, timestampMs }. Fails if the simulator-server / emulator backend is not reachable for the given device, or if any swept finger position falls outside 0-1 — reduce the radius, move the center, or sweep a narrower arc. Note a finger that merely lands NEAR an edge can still be grabbed by a system gesture, so keep some margin.
+Use when you need to rotate a map, image picker, or any rotateable UI element. Returns { rotated: true, timestampMs }. Fails if the simulator-server / emulator backend is not reachable for the given device.
 Size the orbit with radius, or with radiusX and radiusY together (the pair overrides radius); one half of the pair alone, or none of the three, is rejected.`,
   zodSchema,
   capability,
@@ -134,12 +134,9 @@ Size the orbit with radius, or with radiusX and radiusY together (the pair overr
         params.startAngle +
         (params.endAngle - params.startAngle) * (offScreen.frameIndex / Math.max(1, steps));
       throw new InvalidToolInputError(
-        `gesture-rotate: finger ${offScreen.axis} = ${offScreen.value} at ${Math.round(sweptDeg)}° ` +
-          `of the sweep is off-screen (must be 0–1). centerX ${params.centerX} / centerY ` +
-          `${params.centerY} with radiusX ${radiusX} / radiusY ${radiusY} puts a finger ` +
-          `${describeOffScreenEdge(offScreen.axis, offScreen.value)} — the OS reads an off-screen ` +
-          `touch as a system gesture instead of a rotation, so the app never sees it. Reduce the ` +
-          `radius, move the center away from that edge, or sweep a narrower arc.`
+        `gesture-rotate: finger ${offScreen.axis} = ${offScreen.value} at ${Math.round(sweptDeg)}° of ` +
+          `the sweep is off-screen (${describeOffScreenEdge(offScreen.axis, offScreen.value)}); reduce ` +
+          `the radius, move the center, or sweep a narrower arc.`
       );
     }
 
