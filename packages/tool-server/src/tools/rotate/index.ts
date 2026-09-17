@@ -21,7 +21,7 @@ interface Result {
 }
 
 const capability: ToolCapability = {
-  apple: { simulator: true, device: true },
+  apple: { simulator: true },
   appleRemote: { simulator: true },
   android: { emulator: true, device: true, unknown: true },
 };
@@ -45,7 +45,7 @@ Returns { orientation, note }. Fails if the target device is not booted.`,
   async execute(services, params) {
     const api = services.simulatorServer as SimulatorServerApi;
     const device = resolveDevice(params.udid);
-    sendCommand(api, { cmd: "rotate", direction: params.orientation });
+    await sendCommand(api, { cmd: "rotate", direction: params.orientation });
     // On iOS the capture is composited in the device's unrotated space, so it
     // comes back sideways after a rotation. `rotation` on `screenshot` will make
     // it readable, but that image is then in a different space from `describe`
