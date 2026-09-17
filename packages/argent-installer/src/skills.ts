@@ -1,15 +1,15 @@
 import { execFileSync } from "node:child_process";
+import semver from "semver";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { track } from "@argent/telemetry";
 import { FAILURE_CODES, type FailureSignal } from "@argent/registry";
-import type { InstallMode } from "./utils.js";
 import {
+  type InstallMode,
   buildArgentSkillsSource,
   getGlobalSkillLockPath,
   getInstalledVersion,
   getProjectSkillLockPath,
-  compareVersions,
   listArgentSkillsInLock,
   listBundledSkills,
   lockedArgentSkillVersion,
@@ -107,8 +107,8 @@ function mayPruneScope(lockPath: string): boolean {
   const lockedVersion = lockedArgentSkillVersion(lockPath);
   if (lockedVersion === null) return false;
   const running = getInstalledVersion();
-  if (!running) return false;
-  return compareVersions(running, lockedVersion) >= 0;
+  if (!running || !semver.valid(running)) return false;
+  return semver.gte(running, lockedVersion);
 }
 
 // Re-syncs bundled argent skills into the caller's chosen scopes, and prunes
