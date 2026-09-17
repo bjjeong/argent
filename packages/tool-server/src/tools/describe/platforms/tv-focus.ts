@@ -25,19 +25,10 @@ function focusRoot(): DescribeNode {
   return { role: "AXGroup", frame: { x: 0, y: 0, width: 1, height: 1 }, children: [] };
 }
 
-/**
- * Shared cause text for an empty focus set, so `describe` and the wait tools
- * explain it the same way. Kept separate from the advice, which differs: only
- * `describe` actually performs the retry-and-recycle it can then talk about.
- */
-const TV_EMPTY_FOCUS_CAUSE =
-  "The app is most likely still launching (splash / loading screen) or mid-transition — a React " +
-  "Native app only exposes focus once its JS bundle has rendered.";
-
-/** What a wait tool says: it diagnoses, and points at the tool that repairs. */
+/** What a wait tool says on an empty focus read; `describe` is the tool that repairs. */
 export const TV_FOCUS_WAIT_EMPTY_HINT =
-  `The TV focus engine reported no focusable elements. ${TV_EMPTY_FOCUS_CAUSE} ` +
-  "Call `describe` once — it retries and recycles the tvOS read path — then wait again.";
+  "The TV focus engine reported no focusable elements (the app is likely still launching); " +
+  "call `describe` once, then wait again.";
 
 /** A focus read is "empty" when nothing actionable was reported. */
 export function isEmptyFocus(res: TvDescribeResponse): boolean {

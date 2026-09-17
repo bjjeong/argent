@@ -379,11 +379,6 @@ It polls the same accessibility / DOM tree as \`describe\`
 Apple TV focus engine, Vega automation toolkit) every pollIntervalMs
 (default ${DEFAULT_POLL_INTERVAL_MS}ms) until timeoutMs (default ${DEFAULT_TIMEOUT_MS}ms).
 
-On an Apple TV the tree is the focus view: \`visible\` means the same as \`exists\` there, because the
-focus engine only enumerates what is on screen and reachable with the D-pad; \`role\` matches the
-element's accessibility traits, and \`{role:"focused"}\` targets whichever element currently holds
-the cursor — the wait to use between \`tv-remote\` and \`select\`. \`identifier\` does not apply.
-
 Returns { success: boolean, elapsed: number, note?, cause? } — success=false means the wait ended without the
 condition holding, which is not always a verdict on the condition: \`cause\` says which it was — \`unmet\` (the tree
 was read and the condition was false there), \`unreadable\` (no trustworthy read, so nothing was judged) or

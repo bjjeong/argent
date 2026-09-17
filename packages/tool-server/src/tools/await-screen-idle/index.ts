@@ -165,11 +165,7 @@ export function createAwaitScreenIdleTool(registry: Registry): ToolDefinition<Pa
 Polls the same accessibility / DOM tree as \`describe\` every pollIntervalMs (default ${DEFAULT_POLL_INTERVAL_MS}ms) until it
 has content and that content holds identical for minStableMs (default ${DEFAULT_MIN_STABLE_MS}ms), or timeoutMs (default
 ${DEFAULT_TIMEOUT_MS}ms) is reached. Returns { settled, waitedMs, polls, note? } — settled=false means the screen never went
-still before the timeout, and \`note\` explains why when the last read said something useful
-(a degraded accessibility read, an app still launching).
-On an Apple TV it polls the focus view rather than a pixel-backed tree: settled means the app,
-the focusable set and the cursor stopped changing, so playback or animation the focus engine
-cannot see will not hold it unsettled. Use after a launch/navigation to wait for the UI to render before screenshotting or tapping.`,
+still before the timeout. Use after a launch/navigation to wait for the UI to render before screenshotting or tapping.`,
     searchHint:
       "wait until screen settles idle stable stops changing animation transition rendered ready before screenshot",
     longRunning: true,

@@ -19,11 +19,11 @@ description: Control and inspect TV apps via argent — Apple TV (tvOS), Android
 
 ## Tools
 
-- `describe {udid}` — focus view: the focused / `[selected]` element + focusable elements with labels, traits and values. It does not print coordinates — a TV is navigated with the D-pad, never by tapping. The discovery tool — call before and after navigating. Empty tree → see the per-platform notes.
+- `describe {udid}` — focus view: the focused / `[selected]` element + focusable elements with labels, traits and values (no coordinates). Call before and after navigating. Empty tree → see the per-platform notes.
 - `tv-remote {udid, button}` — D-pad / remote. `button` is one key **or a whole path** (run in one call). Keys: `up`/`down`/`left`/`right`, `select`, `back`, `menu`, `home`, `playPause`, plus media keys `rewind`/`fastForward`/`next`/`previous`/`volumeUp`/`volumeDown`/`mute`. Single: `{button:"down"}`; repeat: `{button:"down", repeat:3}`; path: `{button:["up","right","select"]}`.
 - `keyboard {udid, text}` — type into the focused field (focus it with `tv-remote` first). One call carries `text` or `key`, never both — to type and then press a key, send two `keyboard` steps in one `run-sequence`. Named `key` presses (e.g. `{key:"enter"}`) work on Vega; on Apple TV / Android TV move focus with `tv-remote` instead.
 - `launch-app` / `restart-app` / `reinstall-app {udid, bundleId}` — `bundleId` from the app manifest. Vega `reinstall-app` takes `appPath` = a `.vpkg`.
-- `await-ui-element {udid, …}` / `await-screen-idle {udid}` — wait for the TV to be ready instead of guessing a delay. They poll the same focus view `describe` reads. `visible` means the same as `exists` there (the focus engine only enumerates what is on screen and reachable); wait for the cursor with `{condition:"exists", selector:{text:"X", role:"focused"}}`. `await-screen-idle` settles once the app, the focusable set and the cursor stop changing — playback or animation the focus engine cannot see will not hold it unsettled.
+- `await-ui-element` / `await-screen-idle {udid}` — wait instead of guessing a delay; wait for the cursor with `{condition:"exists", selector:{text:"X", role:"focused"}}`.
 - `screenshot {udid, scale?}` — Apple TV via `xcrun simctl io` (downscaled); Android TV / Vega host-side via `adb` / `screencap`.
 
 ## Per-platform
