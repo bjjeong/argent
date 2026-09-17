@@ -78,8 +78,8 @@ describe("the rotate note", () => {
     // silently disagree with describe and with touch — worse than a sideways
     // image, because the failure is invisible.
     expect(IOS_ROTATED_CAPTURE_NOTE).toContain("rotation");
-    expect(IOS_ROTATED_CAPTURE_NOTE).toMatch(/different space/);
-    expect(IOS_ROTATED_CAPTURE_NOTE).toMatch(/do not read coordinates off it/i);
+    expect(IOS_ROTATED_CAPTURE_NOTE).toMatch(/describe/);
+    expect(IOS_ROTATED_CAPTURE_NOTE).toMatch(/never from a `rotation`-corrected capture/);
   });
 
   it("is returned for every orientation that leaves the capture unrotated", () => {

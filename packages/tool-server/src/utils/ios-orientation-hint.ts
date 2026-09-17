@@ -37,10 +37,7 @@ export function isLandscapeScreenFrame(frame: ScreenFrameLike | undefined): bool
 }
 
 export const LANDSCAPE_COORDINATE_HINT =
-  "This device is rotated, and these coordinates are in the app's upright space. " +
-  "Touch input is in the device's unrotated space, so tapping these values directly " +
-  "will miss. Only a tree read from the accessibility service (`describe` with " +
-  "`source: ax-service`) is in touch space, so tap from that.";
+  "Device is rotated: these coordinates are in the app's upright space, not touch space, so tapping them will miss; tap from `describe` with source ax-service.";
 
 /**
  * What `rotate` tells the caller on iOS.
@@ -51,10 +48,7 @@ export const LANDSCAPE_COORDINATE_HINT =
  * device's unrotated one, so coordinates read off that image miss.
  */
 export const IOS_ROTATED_CAPTURE_NOTE =
-  "On iOS the screen is captured in the device's unrotated space, so `screenshot` will not come " +
-  "back upright after this. Passing `rotation` to `screenshot` makes it readable, but that image " +
-  "is then in a different space from `describe` frames and from where taps land — do not read " +
-  "coordinates off it. Use `describe` for anything you intend to tap.";
+  "iOS screenshots stay in the unrotated space; take tap coordinates from `describe`, never from a `rotation`-corrected capture.";
 
 /**
  * The note `rotate` returns on iOS for a given target orientation.
