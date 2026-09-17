@@ -21,6 +21,13 @@ vi.mock("../src/utils/ios-devices", async () => {
   return { ...actual, isTvOsSimulator: async () => true };
 });
 
+// Pin the Android-TV probe too: the real one shells out to `adb`, which hangs
+// or answers for whatever emulator happens to be running on the host.
+vi.mock("../src/utils/adb", async () => {
+  const actual = await vi.importActual<typeof import("../src/utils/adb")>("../src/utils/adb");
+  return { ...actual, isAndroidTv: async () => true };
+});
+
 const describeAndroidMock = vi.fn();
 vi.mock("../src/tools/describe/platforms/android", async () => {
   const actual = await vi.importActual<typeof import("../src/tools/describe/platforms/android")>(

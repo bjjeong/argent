@@ -30,7 +30,7 @@ function focusRoot(): DescribeNode {
  * explain it the same way. Kept separate from the advice, which differs: only
  * `describe` actually performs the retry-and-recycle it can then talk about.
  */
-export const TV_EMPTY_FOCUS_CAUSE =
+const TV_EMPTY_FOCUS_CAUSE =
   "The app is most likely still launching (splash / loading screen) or mid-transition — a React " +
   "Native app only exposes focus once its JS bundle has rendered.";
 
