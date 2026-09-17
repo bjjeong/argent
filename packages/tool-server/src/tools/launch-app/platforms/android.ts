@@ -95,11 +95,7 @@ export async function assertAmStartLaunched(
     );
   }
 
-  return (
-    "The app took longer than Android's launch wait window to settle, so the launch was confirmed " +
-    "by checking that the app's process is running. It is up but may still be on a splash or " +
-    "loading screen — wait for the expected UI or take a screenshot before interacting."
-  );
+  return "Launch overran Android's wait window but the app process is running; it may still be loading, so wait for the expected UI before interacting.";
 }
 
 // Normalize a user-supplied `activity` into a `pkg/Activity` component for
