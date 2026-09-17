@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { assertSupported, UnsupportedOperationError } from "../src/utils/capability";
 import { resolveDevice } from "../src/utils/device-info";
-import { screenshotDiffTool } from "../src/tools/screenshot-diff";
+import { executeScreenshotDiffTool, screenshotDiffTool } from "../src/tools/screenshot-diff";
 import { SCREENSHOT_CAPTURE_CAPABILITY } from "../src/tools/screenshot";
 
 // The refusal these pin happens at the capability gate, before `execute` runs,
@@ -65,6 +65,22 @@ describe("screenshot-diff live capture", () => {
     ]);
     expect(Object.keys(services("emulator-5554", true))).toEqual(["simulatorServer"]);
   });
+
+  it.each([
+    ["chromium", "chromium-cdp-9222"],
+    ["vega", "amazon-4a27df03c9777152"],
+  ])(
+    "refuses a live capture on %s with an error that names screenshots",
+    async (platform, udid) => {
+      await expect(
+        executeScreenshotDiffTool({}, { udid, baselinePath: "/tmp/a.png", captureCurrent: true })
+      ).rejects.toThrow(
+        new RegExp(
+          `Cannot capture a screenshot for a diff on ${platform}.*baselinePath and currentPath`
+        )
+      );
+    }
+  );
 
   it("asks for nothing when both sides are saved files", () => {
     expect(services("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", false)).toEqual({});
