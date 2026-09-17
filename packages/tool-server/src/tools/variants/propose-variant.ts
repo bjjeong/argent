@@ -10,10 +10,8 @@ const zodSchema = z.object({
     .max(200)
     .describe(
       'Human name of the on-screen element this variant targets, e.g. "Foo button" or ' +
-        '"profile header". This label IS the element\'s identity: repeated calls with the same ' +
-        "label (ignoring case and surrounding whitespace) accumulate variants on one picker card, " +
-        "whatever `match` they pass. Give genuinely different elements different labels. Also used " +
-        "as the default screen matcher when `match` is omitted."
+        '"profile header". Repeated calls with the same element accumulate multiple variants ' +
+        "on it. Used as the default screen matcher when `match` is omitted."
     ),
   udid: z
     .string()
@@ -40,11 +38,8 @@ const zodSchema = z.object({
     .optional()
     .describe(
       "Optional precise matcher so the floating variant bubble anchors to the right element on " +
-        "the streamed screen. Defaults to { by: 'text', value: element }. This is a locator only — " +
-        "it does not affect which element variants group under. A matcher you supply replaces the " +
-        "label-derived default, but if you then supply a different one for the same label the " +
-        "first is kept and the response reports what was ignored. Get exact labels/identifiers " +
-        "from the `describe` tool first for reliable anchoring."
+        "the streamed screen. Defaults to { by: 'text', value: element }. Get exact " +
+        "labels/identifiers from the `describe` tool first for reliable anchoring."
     ),
   variant: z
     .object({
@@ -153,9 +148,8 @@ it does not wait for the user.`,
       // the element one way and the card will use another, and the likeliest
       // cause is that two different elements were given the same label.
       const ignored = res.matchIgnored
-        ? ` Kept the matcher this element already had (${res.matchApplied.by}=${res.matchApplied.value}) ` +
-          `and ignored ${res.matchIgnored.by}=${res.matchIgnored.value} — variants group by the ` +
-          `\`element\` label, so give a different label if these are different elements.`
+        ? ` Ignored ${res.matchIgnored.by}=${res.matchIgnored.value}: "${res.element}" already anchors on ` +
+          `${res.matchApplied.by}=${res.matchApplied.value}; use a different element label for a different element.`
         : "";
 
       return {
