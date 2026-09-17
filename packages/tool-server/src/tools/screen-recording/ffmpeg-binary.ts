@@ -261,32 +261,19 @@ export function ffmpegUnavailableMessage(result: Extract<FfmpegResolution, { ok:
 
   if (override) {
     return reason === "missing"
-      ? `\`${FFMPEG_OVERRIDE_ENV}\` is set to \`${override}\`, but there is no executable there. ` +
-          `Point it at an ffmpeg binary, or unset it to let argent search PATH.`
-      : `\`${FFMPEG_OVERRIDE_ENV}\` points at \`${override}\`, but it could not be run (check its ` +
-          `permissions). Point it at an executable ffmpeg, or unset it to let argent search PATH.`;
+      ? `\`${FFMPEG_OVERRIDE_ENV}\` (\`${override}\`) is not an executable; point it at ffmpeg or unset it.`
+      : `\`${FFMPEG_OVERRIDE_ENV}\` (\`${override}\`) could not be run; check its permissions or unset it.`;
   }
 
   if (reason === "missing") {
     return (
-      "`ffmpeg` was not found on PATH or at " +
-      `${FFMPEG_FALLBACK_PATHS.join(", ")}. ` +
-      "Install it with your system package manager (`brew install ffmpeg` on macOS, " +
-      "`apt install ffmpeg` on Debian/Ubuntu; on Fedora use RPM Fusion's `ffmpeg`, since the " +
-      "default `ffmpeg-free` build has no libx264) or see https://ffmpeg.org/download.html, " +
-      "then retry."
+      "`ffmpeg` was not found on PATH. Install a build with libx264 (`brew install ffmpeg` on " +
+      "macOS, `apt install ffmpeg` on Debian/Ubuntu) and retry."
     );
   }
 
-  // The case that made this message worth building: saying "ffmpeg was not
-  // found" to someone with three ffmpegs installed is what sent the reporter
-  // looking in the wrong place.
   return (
-    `Found ffmpeg at ${tried.join(", ")}, but none of them can record: recording needs the ` +
-    "`libx264` encoder to write H.264, and a `--disable-gpl` build does not have it — " +
-    "conda-forge's and Fedora's default `ffmpeg-free` are both built that way. Install a full " +
-    "build ahead of it on PATH (`brew install ffmpeg` on macOS, `apt install ffmpeg` on " +
-    "Debian/Ubuntu, RPM Fusion's `ffmpeg` on Fedora), or point argent straight at one with " +
-    `\`${FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg\`.`
+    `Found ffmpeg at ${tried.join(", ")}, but none has the libx264 encoder recording needs; ` +
+    `install a full build ahead of it on PATH or set \`${FFMPEG_OVERRIDE_ENV}=/path/to/ffmpeg\`.`
   );
 }
