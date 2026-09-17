@@ -354,7 +354,8 @@ export function buildTextTree(
             members.push(cur);
             cur = childrenOf.get(cur)![0]!;
           }
-          if (members.length >= 1) {
+          // A one-wrapper chain renders its start anyway, so collapsing it hides nothing.
+          if (members.length >= 2) {
             chains.push({ startId: id, length: members.length, members });
           }
         }
