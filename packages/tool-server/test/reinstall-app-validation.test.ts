@@ -118,7 +118,7 @@ describe("reinstall-app rejects a bad artifact before uninstalling anything", ()
 
   it("ios: a file where a .app bundle directory was expected", async () => {
     await expect(iosImpl.handler({} as never, params(NOT_AN_ARTIFACT), DEVICE)).rejects.toThrow(
-      /is a file, but an iOS app bundle is a directory/
+      /is a file, but an iOS simulator needs a .app bundle directory/
     );
     expect(execFileCalls).toHaveLength(0);
   });
@@ -133,7 +133,7 @@ describe("reinstall-app rejects a bad artifact before uninstalling anything", ()
   it("ios-remote: same structural checks, no device round trip", async () => {
     await expect(
       iosRemoteImpl.handler({} as never, params(NOT_AN_ARTIFACT), DEVICE)
-    ).rejects.toThrow(/iOS app bundle is a directory/);
+    ).rejects.toThrow(/iOS simulator needs a .app bundle directory/);
     expect(simctlUninstall).not.toHaveBeenCalled();
     expect(simctlInstall).not.toHaveBeenCalled();
   });
@@ -212,7 +212,7 @@ describe("reinstall-app rejects a bad artifact before uninstalling anything", ()
     const err = await androidImpl
       .handler({} as never, params(NOT_AN_ARTIFACT), DEVICE)
       .catch((e: Error) => e);
-    expect(String(err)).toContain("existing installation was left untouched");
+    expect(String(err)).toContain("nothing was uninstalled");
   });
 });
 

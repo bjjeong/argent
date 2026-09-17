@@ -67,9 +67,7 @@ export async function assertInstallableArtifact(
   const stat = await fs.stat(abs).catch(() => null);
   if (!stat) {
     reject(
-      `App path "${abs}" does not exist, so there is nothing to install. The existing installation ` +
-        `was left untouched. Check the path — iOS expects the .app bundle directory, Android an ` +
-        `.apk file, Vega a .vpkg file.`,
+      `App path "${abs}" does not exist; nothing was uninstalled.`,
       "reinstall_app_path_missing"
     );
   }
@@ -78,15 +76,13 @@ export async function assertInstallableArtifact(
   if (target === "ios-device" && stat.isFile()) {
     if (!hasExtension(abs, [".ipa"])) {
       reject(
-        `App path "${abs}" is a file but not an .ipa. A physical iPhone takes a signed .app bundle ` +
-          `directory or an .ipa. The existing installation was left untouched.`,
+        `App path "${abs}" is a file but not an .ipa (a physical iPhone takes a .app directory or an .ipa); nothing was uninstalled.`,
         "reinstall_app_path_wrong_extension"
       );
     }
     if (stat.size === 0 || !(await looksLikeZip(abs))) {
       reject(
-        `App path "${abs}" is named .ipa but is not a zip archive, so it cannot be installed. Check ` +
-          `the export is complete. The existing installation was left untouched.`,
+        `App path "${abs}" is not a valid .ipa (not a zip archive); nothing was uninstalled.`,
         "reinstall_app_path_malformed"
       );
     }
@@ -98,24 +94,20 @@ export async function assertInstallableArtifact(
     // .app nests it under Contents/, so this also rejects a desktop build.
     if (!stat.isDirectory()) {
       reject(
-        `App path "${abs}" is a file, but an iOS app bundle is a directory (.app). If this is an ` +
-          `.ipa or an archive, unpack it and pass the .app inside. The existing installation was ` +
-          `left untouched.`,
+        `App path "${abs}" is a file, but an iOS simulator needs a .app bundle directory; nothing was uninstalled.`,
         "reinstall_app_path_wrong_kind"
       );
     }
     if (!hasExtension(abs, [".app"])) {
       reject(
-        `App path "${abs}" is not a .app bundle. The existing installation was left untouched.`,
+        `App path "${abs}" is not a .app bundle; nothing was uninstalled.`,
         "reinstall_app_path_wrong_extension"
       );
     }
     const plist = await fs.stat(path.join(abs, "Info.plist")).catch(() => null);
     if (!plist) {
       reject(
-        `App path "${abs}" has no Info.plist at its root, so it is not an iOS app bundle — a macOS ` +
-          `.app keeps it under Contents/, and a partially-copied bundle may be missing it. The ` +
-          `existing installation was left untouched.`,
+        `App path "${abs}" has no Info.plist at its root, so it is not an iOS app bundle; nothing was uninstalled.`,
         "reinstall_app_path_malformed"
       );
     }
@@ -124,8 +116,7 @@ export async function assertInstallableArtifact(
 
   if (stat.isDirectory()) {
     reject(
-      `App path "${abs}" is a directory, but ${target === "android" ? "Android expects a single .apk file" : "Vega expects a single .vpkg file"}. ` +
-        `The existing installation was left untouched.`,
+      `App path "${abs}" is a directory, but ${target === "android" ? "Android expects an .apk file" : "Vega expects a .vpkg file"}; nothing was uninstalled.`,
       "reinstall_app_path_wrong_kind"
     );
   }
@@ -133,16 +124,13 @@ export async function assertInstallableArtifact(
   if (target === "android") {
     if (!hasExtension(abs, [".apk", ".apex"])) {
       reject(
-        `App path "${abs}" is not an .apk or .apex — adb rejects any other filename, which would ` +
-          `leave the device with no copy of the app. The existing installation was left untouched.`,
+        `App path "${abs}" is not an .apk or .apex; nothing was uninstalled.`,
         "reinstall_app_path_wrong_extension"
       );
     }
     if (stat.size === 0 || !(await looksLikeZip(abs))) {
       reject(
-        `App path "${abs}" is named .apk but is not a zip archive, so it cannot be installed — an ` +
-          `APK always starts with a zip header. Check the build output is complete. The existing ` +
-          `installation was left untouched.`,
+        `App path "${abs}" is not a valid .apk (not a zip archive); nothing was uninstalled.`,
         "reinstall_app_path_malformed"
       );
     }
@@ -151,7 +139,7 @@ export async function assertInstallableArtifact(
 
   if (!hasExtension(abs, [".vpkg"])) {
     reject(
-      `App path "${abs}" is not a .vpkg package. The existing installation was left untouched.`,
+      `App path "${abs}" is not a .vpkg package; nothing was uninstalled.`,
       "reinstall_app_path_wrong_extension"
     );
   }
@@ -201,10 +189,7 @@ export async function assertNotInsideDeviceContainer(
     const resolved = await realpathOrSelf(deviceDir);
     if (isInside(resolved, target) || isInside(deviceDir, target)) {
       reject(
-        `App path "${absAppPath}" is inside this simulator's own container. Reinstalling uninstalls ` +
-          `first, which deletes that container — and with it the bundle being installed from — so ` +
-          `the app would be left uninstalled. Point appPath at your build output (the .app in ` +
-          `DerivedData or your project) instead. The existing installation was left untouched.`,
+        `App path "${absAppPath}" is inside this simulator's own container, which reinstalling deletes; point appPath at your build output (nothing was uninstalled).`,
         "reinstall_app_path_in_device_container"
       );
     }
