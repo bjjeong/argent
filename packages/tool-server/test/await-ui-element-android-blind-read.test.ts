@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/utils/adb", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/utils/adb")>()),
-  adbShell: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  // isAndroidTv probes the serial over real adb; this suite is not about TV detection.
+  isAndroidTv: async () => false,
 }));
 
 import { createAwaitUiElementTool } from "../src/tools/await-ui-element";
 import type { AndroidDevtoolsApi } from "../src/blueprints/android-devtools";
+import { __primeDepCacheForTests, __resetDepCacheForTests } from "../src/utils/check-deps";
 
 const SERIAL = "emulator-5554";
 
@@ -24,6 +26,12 @@ function registryWith(xml: string, nodeCount: number) {
 }
 
 describe("await-ui-element — a blind Android read cannot confirm `hidden`", () => {
+  beforeEach(() => {
+    // CI hosts have no adb on PATH; the dependency gate must not fail the call.
+    __resetDepCacheForTests();
+    __primeDepCacheForTests(["adb"]);
+  });
+
   it("does not report an element hidden when the screen could not be read", async () => {
     // Measured on a device: with the display off, `await-ui-element hidden`
     // returned success in 5ms for an element that was still on the screen —

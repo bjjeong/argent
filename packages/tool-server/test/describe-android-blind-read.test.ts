@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/utils/adb", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/utils/adb")>()),
-  // isAndroidTv shells out; this suite is not about TV detection.
-  adbShell: vi.fn(async () => ({ stdout: "", stderr: "", code: 0 })),
+  // isAndroidTv probes the serial over real adb; this suite is not about TV detection.
+  isAndroidTv: async () => false,
 }));
 
 import { describeAndroid } from "../src/tools/describe/platforms/android";
