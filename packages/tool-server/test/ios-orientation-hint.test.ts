@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   IOS_ROTATED_CAPTURE_NOTE,
   LANDSCAPE_COORDINATE_HINT,
+  iosRotateNote,
   isLandscapeScreenFrame,
   withLandscapeHint,
 } from "../src/utils/ios-orientation-hint";
@@ -79,5 +80,15 @@ describe("the rotate note", () => {
     expect(IOS_ROTATED_CAPTURE_NOTE).toContain("rotation");
     expect(IOS_ROTATED_CAPTURE_NOTE).toMatch(/different space/);
     expect(IOS_ROTATED_CAPTURE_NOTE).toMatch(/do not read coordinates off it/i);
+  });
+
+  it("is returned for every orientation that leaves the capture unrotated", () => {
+    for (const o of ["LandscapeLeft", "LandscapeRight", "PortraitUpsideDown"]) {
+      expect(iosRotateNote(o)).toBe(IOS_ROTATED_CAPTURE_NOTE);
+    }
+  });
+
+  it("is not returned when rotating back to Portrait, where the spaces agree again", () => {
+    expect(iosRotateNote("Portrait")).toBeUndefined();
   });
 });

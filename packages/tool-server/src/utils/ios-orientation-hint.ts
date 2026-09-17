@@ -13,6 +13,10 @@
  * `(0.238, 0.342)` from ax-service and `(0.342, 0.762)` from native-devtools,
  * related by `ax.x = 1 - native.y`, `ax.y = native.x` — a 90° rotation.
  *
+ * The aspect check only catches the landscape orientations. PortraitUpsideDown
+ * keeps a portrait screen frame while its coordinates are 180° off touch space,
+ * so no hint fires there; `rotate` still warns when it is the one rotating.
+ *
  * These coordinates are deliberately NOT transformed here. The only orientation
  * signal available is the screen's aspect, which gives the axis but not the
  * sense — it cannot separate LandscapeLeft from LandscapeRight, and those differ
@@ -35,16 +39,9 @@ export function isLandscapeScreenFrame(frame: ScreenFrameLike | undefined): bool
 export const LANDSCAPE_COORDINATE_HINT =
   "This device is rotated, and these coordinates are in the app's upright space. " +
   "Touch input is in the device's unrotated space, so tapping these values directly " +
-  "will miss. Prefer `describe` (which reads the accessibility tree in touch space) " +
-  "for anything you intend to tap.";
+  "will miss. Only a tree read from the accessibility service (`describe` with " +
+  "`source: ax-service`) is in touch space, so tap from that.";
 
-/**
- * Combine an existing hint with the landscape advisory.
- *
- * Existing hints stay first: `describe`'s other hints tell the caller the
- * simulator needs rebooting or the app cannot be inspected at all, and those are
- * blocking problems where this advisory would only be noise.
- */
 /**
  * What `rotate` tells the caller on iOS.
  *
@@ -54,11 +51,28 @@ export const LANDSCAPE_COORDINATE_HINT =
  * device's unrotated one, so coordinates read off that image miss.
  */
 export const IOS_ROTATED_CAPTURE_NOTE =
-  "On iOS the screen is captured in the device's unrotated space, so `screenshot` will look " +
-  "sideways after this. Passing `rotation` to `screenshot` makes it readable, but that image " +
+  "On iOS the screen is captured in the device's unrotated space, so `screenshot` will not come " +
+  "back upright after this. Passing `rotation` to `screenshot` makes it readable, but that image " +
   "is then in a different space from `describe` frames and from where taps land — do not read " +
   "coordinates off it. Use `describe` for anything you intend to tap.";
 
+/**
+ * The note `rotate` returns on iOS for a given target orientation.
+ *
+ * Rotating back to Portrait puts capture, touch and the app's own space back in
+ * agreement, so there is nothing to warn about there.
+ */
+export function iosRotateNote(orientation: string): string | undefined {
+  return orientation === "Portrait" ? undefined : IOS_ROTATED_CAPTURE_NOTE;
+}
+
+/**
+ * Combine an existing hint with the landscape advisory.
+ *
+ * Existing hints stay first: `describe`'s other hints tell the caller the
+ * simulator needs rebooting or the app cannot be inspected at all, and those are
+ * blocking problems where this advisory would only be noise.
+ */
 export function withLandscapeHint(
   existing: string | undefined,
   frame: ScreenFrameLike | undefined
