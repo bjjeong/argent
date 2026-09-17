@@ -40,10 +40,10 @@ describe("view-network-logs — empty result describes the capture window", () =
       capturedForMs: 2,
     });
 
-    expect(out).toContain("No network traffic captured.");
-    expect(out).toContain("recording for 2 ms");
+    expect(out).toContain("No network traffic captured");
+    expect(out).toContain("in the 2 ms since");
     // The whole point of the issue: an empty log must not read as a verdict.
-    expect(out).toContain('not "the app made no requests"');
+    expect(out).toContain("earlier requests");
     // The old wording asserted a state it had just created.
     expect(out).not.toContain("Network interception is active");
   });
@@ -55,7 +55,7 @@ describe("view-network-logs — empty result describes the capture window", () =
       interceptorInstalled: true,
       capturedForMs: 754_000,
     });
-    expect(out).toContain("recording for 12 min");
+    expect(out).toContain("in the 12 min");
   });
 
   it("says the window is unknown rather than inventing a fresh one for a stale interceptor", async () => {
@@ -70,7 +70,7 @@ describe("view-network-logs — empty result describes the capture window", () =
     });
 
     expect(out).toContain("start time is unknown");
-    expect(out).not.toContain("recording for");
+    expect(out).not.toContain(" since fetch() capture started");
   });
 
   it("states plainly when nothing was recording at all", async () => {
@@ -93,7 +93,7 @@ describe("view-network-logs — empty result describes the capture window", () =
       capturedForMs: 5_000,
     });
     expect(out).toContain("NETWORK LOGS");
-    expect(out).not.toContain("No network traffic captured.");
+    expect(out).not.toContain("No network traffic captured");
   });
 
   it("names the exclusions that make an empty result ambiguous", async () => {
@@ -108,14 +108,14 @@ describe("view-network-logs — empty result describes the capture window", () =
     expect(out).toContain("XMLHttpRequest");
     expect(out).toContain("axios");
     // The Metro filter is silent and was undocumented.
-    expect(out).toContain("localhost:8081");
+    expect(out).toContain("Metro requests");
   });
 
   it("tolerates a runtime that reports neither field", async () => {
     // Older interceptors answer without the new keys; that must not throw or
-    // produce "recording for undefined".
+    // produce "in the undefined".
     const out = await runWithReadResult({ entries: [], total: 0 });
-    expect(out).toContain("No network traffic captured.");
+    expect(out).toContain("No network traffic captured");
     expect(out).not.toContain("undefined");
   });
 });

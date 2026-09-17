@@ -31,10 +31,6 @@ One Metro port can serve multiple connected devices (e.g. two simulators on `loc
 
 With two or more devices on one Metro, `debugger-connect` refuses a udid/serial and hands back the `logicalDeviceId` to re-target with. That id then keys the session — including for teardown. **Pass it in `stop-all-simulator-servers`' `devices` alongside the device id**, or the session survives your session end holding its CDP socket, console server and log file. The teardown reports what it could not reach in `left_running`; re-call with the id it names.
 
-### Network capture starts when you first ask for it (React Native)
-
-On RN, `view-network-logs` / `view-network-request-details` inject the `fetch()` interceptor the first time one of them runs; earlier traffic is never recorded, and any JS reload discards the interceptor and everything captured. **Arm capture before the interaction you want to observe**: call `view-network-logs` once up front, drive the app, then read the logs. An empty result quotes how long capture has been running — a few milliseconds means you learned nothing.
-
 ### Connect & diagnostics
 
 | Tool               | Purpose                                                                                                                                                                                                                                                                                                                                                                                                      |
