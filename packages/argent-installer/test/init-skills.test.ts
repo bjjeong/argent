@@ -55,9 +55,9 @@ function step(overrides: Record<string, unknown> = {}) {
     scope: "local",
     version: "0.18.1",
     fromTar: null,
-    yes: true,
+    nonInteractive: true,
     ...overrides,
-  } as never);
+  } as Parameters<typeof runSkillsStep>[0]);
 }
 
 /** The source argument of the Nth `npx skills add` attempt. */
@@ -165,5 +165,16 @@ describe("skills install falls back to the copy that ships with the package", ()
     await step({ scope: "global" });
 
     expect(runNpxSkills.mock.calls[1]![0]).toContain("-g");
+  });
+
+  it("keeps the scope in the manual command when both attempts fail", async () => {
+    runNpxSkills.mockRejectedValue(new Error(REPORTED_FAILURE));
+
+    await step({ scope: "global" });
+
+    const hint = log.info.mock.calls
+      .map((c) => String(c[0]))
+      .find((line) => line.includes("manually"))!;
+    expect(hint).toContain(`${SKILLS_DIR} -g`);
   });
 });

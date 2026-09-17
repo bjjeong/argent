@@ -58,11 +58,17 @@ function reportSkillsFailure(
   method: SkillsMethod,
   spinner: { stop: (msg?: string) => void },
   err: unknown,
-  attempted: string
+  attempted: string,
+  scope: Scope,
+  customRoot?: string
 ): void {
   if (method === "default") spinner.stop(pc.red("Skills installation failed."));
   p.log.error(`Failed to install skills from ${attempted}: ${meaningfulLine(err)}`);
-  p.log.info(`You can install them manually:\n  npx skills add ${SKILLS_DIR} --skill '*' -y`);
+  // Same scope as the attempt: without `-g` a global install would land in the
+  // current directory, and a custom-root install runs from that root.
+  const command = `npx skills add ${SKILLS_DIR}${scope === "global" ? " -g" : ""} --skill '*' -y`;
+  const prefix = scope === "custom" && customRoot ? `cd ${customRoot} && ` : "";
+  p.log.info(`You can install them manually:\n  ${prefix}${command}`);
 }
 
 // Step 2. Emits the skill_install telemetry event itself (it owns all the
@@ -166,8 +172,8 @@ export async function runSkillsStep(args: {
       return offlineWithCache ? ["--no-install", ...args] : args;
     };
 
-    // `--force` softens the host project's npm engine gate (see withNpmForce /
-    // issue #298); the displayed and manual-fallback commands stay clean.
+    // `--force` softens the host project's npm engine gate (see withNpmForce);
+    // the displayed and manual-fallback commands stay clean.
     p.log.info(`Running: ${pc.dim("npx")} ${pc.cyan(buildSkillsArgs(skillsSource).join(" "))}`);
 
     const spinner = p.spinner();
@@ -229,11 +235,11 @@ export async function runSkillsStep(args: {
             "Skills installed locally"
           );
         } catch (fallbackErr) {
-          reportSkillsFailure(skillsMethod, spinner, fallbackErr, SKILLS_DIR);
+          reportSkillsFailure(skillsMethod, spinner, fallbackErr, SKILLS_DIR, scope, customRoot);
           skillOutcome = "failure";
         }
       } else {
-        reportSkillsFailure(skillsMethod, spinner, err, skillsSource);
+        reportSkillsFailure(skillsMethod, spinner, err, skillsSource, scope, customRoot);
         skillOutcome = "failure";
       }
     }
@@ -260,4 +266,3 @@ export async function runSkillsStep(args: {
     usedFallback,
   };
 }
-

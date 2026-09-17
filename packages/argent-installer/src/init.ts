@@ -356,7 +356,7 @@ interface SummaryArgs {
  * version — is an ordinary success and must read as one; only a pinned attempt
  * that failed first is worth calling out.
  */
-export function formatSkillsSummaryLine(skills: SkillsStepResult): string {
+function formatSkillsSummaryLine(skills: SkillsStepResult): string {
   if (skills.method === "manual") return `${pc.green("Skills")} instructions printed`;
   if (skills.outcome === "failure") {
     return `${pc.yellow("Skills")} NOT installed — see the error above`;
