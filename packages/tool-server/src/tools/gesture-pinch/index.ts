@@ -70,7 +70,7 @@ interface Result {
 }
 
 const capability: ToolCapability = {
-  apple: { simulator: true, device: true },
+  apple: { simulator: true },
   appleRemote: { simulator: true },
   android: { emulator: true, device: true, unknown: true },
 };
@@ -144,7 +144,7 @@ Use when you need to zoom in or out on a map, image, or zoomable view. Returns {
       const type = i === 0 ? "Down" : i === steps ? "Up" : "Move";
       if (i === 0) timestampMs = Date.now();
 
-      sendTouchEvent(api, type, frame.x1, frame.y1, frame.x2, frame.y2);
+      await sendTouchEvent(api, type, frame.x1, frame.y1, frame.x2, frame.y2);
       if (i < steps) await sleep(16);
     }
 
