@@ -134,7 +134,9 @@ it does not wait for the user.`,
       // Best-effort: failure leaves the frame undefined and the preview UI falls back.
       let frame = params.variant.frame;
       if (!frame && params.udid) {
-        const match = params.match ?? { by: "text" as const, value: params.element };
+        // Locate the element the way its card will, not by this call's own
+        // `match`: an element that already has an explicit matcher keeps it.
+        const match = variantProposalStore.locatorFor(params.element, params.match);
         const captured = await captureElementFrame(registry, params.udid, match);
         if (captured) frame = captured;
       }

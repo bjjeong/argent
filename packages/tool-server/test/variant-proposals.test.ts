@@ -1059,6 +1059,30 @@ describe("VariantProposalStore — element is the identity (issue #624)", () => 
     expect(r2.matchIgnored).toEqual({ by: "identifier", value: "buy-bottom" });
   });
 
+  it("locates a new variant's frame with the matcher its card anchors on", () => {
+    // propose_variant captures the element frame before staging; it must use the
+    // matcher the card will keep, or the thumbnail crops a different node.
+    const s = new VariantProposalStore();
+    const buyTop = { by: "identifier" as const, value: "buy-top" };
+    expect(s.locatorFor("Buy")).toEqual({ by: "text", value: "Buy" });
+    s.proposeVariant({ element: "Buy", match: buyTop, variant: variant("A") });
+
+    expect(s.locatorFor(" buy ")).toEqual(buyTop);
+    expect(s.locatorFor("Buy", { by: "identifier", value: "buy-bottom" })).toEqual(buyTop);
+    expect(s.locatorFor("Other", { by: "role", value: "button" })).toEqual({
+      by: "role",
+      value: "button",
+    });
+  });
+
+  it("lets an explicit matcher replace a label-derived one when locating", () => {
+    const s = new VariantProposalStore();
+    s.proposeVariant({ element: "Search", variant: variant("A") });
+    const id = { by: "identifier" as const, value: "search-input" };
+    expect(s.locatorFor("Search", id)).toEqual(id);
+    expect(s.locatorFor("Search")).toEqual({ by: "text", value: "Search" });
+  });
+
   it("numbers variants within their own element", () => {
     // The ids used to come from a store-wide counter, so an element's second
     // variant could be called v5 — which read as a per-element sequence and

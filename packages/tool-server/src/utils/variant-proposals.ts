@@ -458,6 +458,21 @@ export class VariantProposalStore {
     if (this.completed) this.reset();
   }
 
+  /**
+   * The matcher `proposeVariant` would anchor this element's card on, without
+   * mutating anything. The caller's own `match` is not always it: a label that
+   * already carries an explicit matcher keeps that one, so a frame captured for
+   * the new variant must be located the same way or it crops a different node.
+   */
+  locatorFor(element: string, match?: VariantMatch): VariantMatch {
+    const fallback = match ?? { by: "text" as const, value: element };
+    // A completed round is reset by the next proposeVariant, so its cards don't count.
+    if (this.completed) return fallback;
+    const key = elementKey(element);
+    const existing = this.proposals.find((p) => elementKey(p.element) === key);
+    return existing?.matchExplicit ? existing.match : fallback;
+  }
+
   proposeVariant(input: {
     element: string;
     match?: VariantMatch;
