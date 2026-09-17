@@ -40,10 +40,8 @@ function blindReadHint(
     return undefined;
   }
   return (
-    "This read is BLIND, not empty: every node on screen belonged to the system UI, which is what " +
-    "a powered-off display or a lock screen looks like. An element missing from this tree is NOT " +
-    "evidence that it is hidden or gone, and this is NOT a screen with nothing on it. Wake the " +
-    "device (`button` with button `power`) and dismiss the lock screen, then read again."
+    "Blind read: only system UI is on screen (display off or locked), so this tree says nothing " +
+    "about the app; wake the device (`button` power), unlock, and describe again."
   );
 }
 

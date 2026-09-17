@@ -53,7 +53,7 @@ describe("describeAndroid — blind reads (display off / lock screen)", () => {
 
     expect(data.tree.children).toHaveLength(0);
     expect(data.hint).toBeDefined();
-    expect(data.hint).toContain("BLIND, not empty");
+    expect(data.hint).toContain("Blind read");
   });
 
   it("tells the caller what to do about it", async () => {
@@ -65,9 +65,9 @@ describe("describeAndroid — blind reads (display off / lock screen)", () => {
     );
 
     expect(data.hint).toContain("power");
-    expect(data.hint).toContain("lock screen");
+    expect(data.hint).toContain("locked");
     // The distinction the whole fix exists for.
-    expect(data.hint).toContain("NOT evidence that it is hidden or gone");
+    expect(data.hint).toContain("says nothing about the app");
   });
 
   it("says nothing about a screen that really has content", async () => {
@@ -107,6 +107,6 @@ describe("describeAndroid — blind reads (display off / lock screen)", () => {
     const data = await describeAndroid(registryFor(SYSTEM_CHROME_XML, 28), SERIAL, undefined, true);
 
     expect(data.hint).toContain("leanback");
-    expect(data.hint).toContain("BLIND, not empty");
+    expect(data.hint).toContain("Blind read");
   });
 });
