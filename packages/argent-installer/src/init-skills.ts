@@ -26,10 +26,6 @@ export interface SkillsStepResult {
   usedFallback: boolean;
 }
 
-// Step 2 — install skills via `npx skills`. Emits the skill_install telemetry
-// event itself (it owns all the inputs). Throws InitCancelled("skills") on a
-// cancelled method prompt.
-
 /** Matches the usual missing-ref wording. Used for telemetry only — never to decide. */
 const REF_MISSING =
   /Remote branch .* not found in upstream|couldn't find remote ref|unknown revision/i;
@@ -69,6 +65,8 @@ function reportSkillsFailure(
   p.log.info(`You can install them manually:\n  npx skills add ${SKILLS_DIR} --skill '*' -y`);
 }
 
+// Step 2. Emits the skill_install telemetry event itself (it owns all the
+// inputs). Throws InitCancelled("skills") on a cancelled method prompt.
 export async function runSkillsStep(args: {
   nonInteractive: boolean;
   fromTar: string | null;
@@ -263,4 +261,3 @@ export async function runSkillsStep(args: {
   };
 }
 
-export { runNpxSkills } from "./npx-skills.js";
