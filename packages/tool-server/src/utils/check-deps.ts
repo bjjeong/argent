@@ -37,7 +37,7 @@ const INSTALL_HINTS: Record<ToolDependency, string> = {
   "xcrun":
     "Xcode command-line tools not found — iOS/tvOS simulators need a macOS host with them installed. On macOS, run `xcode-select --install` (or install Xcode from the App Store) and retry.",
   "adb":
-    "Android SDK Platform Tools not found. Install `platform-tools` via Android Studio → SDK Manager, the standalone download at https://developer.android.com/tools/releases/platform-tools, `sdkmanager 'platform-tools'` if you already have the SDK command-line tools, or `brew install --cask android-platform-tools` on macOS. If installed, ensure `adb` is on PATH or point `$ANDROID_HOME` (or the `android.sdkRoot` config key) at the SDK root (the resolver checks `<root>/platform-tools/adb`). Only required for Android devices and emulators.",
+    "Android SDK Platform Tools not found. Install `platform-tools` via Android Studio → SDK Manager or `sdkmanager 'platform-tools'` (`brew install --cask android-platform-tools` on macOS). If installed, ensure `adb` is on PATH or point `$ANDROID_HOME` (or the `android.sdkRoot` config key) at the SDK root (the resolver checks `<root>/platform-tools/adb`). Only required for Android devices and emulators.",
   "emulator":
     "Android Emulator not found. Install via Android Studio → SDK Manager → Emulator, or `sdkmanager 'emulator'`. If installed, ensure `emulator` is on PATH or point `$ANDROID_HOME` (or the `android.sdkRoot` config key) at the SDK root (the resolver checks `<root>/emulator/emulator`). Only required to launch new Android emulators via `boot-device`.",
   "sim-remote":
