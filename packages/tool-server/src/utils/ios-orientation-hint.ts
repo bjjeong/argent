@@ -25,7 +25,7 @@
  * honest fix until the orientation itself is on the wire.
  */
 
-export interface ScreenFrameLike {
+interface ScreenFrameLike {
   width: number;
   height: number;
 }
