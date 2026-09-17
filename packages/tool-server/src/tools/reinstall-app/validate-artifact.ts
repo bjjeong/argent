@@ -15,7 +15,7 @@ import { configuredAdditionalDeviceSets, deviceSetForUdid } from "../../utils/io
  * a local stat or a 4-byte read; nothing touches the device.
  */
 
-type ArtifactTarget = "ios" | "android" | "vega";
+type ArtifactTarget = "ios" | "ios-device" | "android" | "vega";
 
 function reject(message: string, stage: string): never {
   throw new InvalidToolInputError(message, {
@@ -74,7 +74,26 @@ export async function assertInstallableArtifact(
     );
   }
 
-  if (target === "ios") {
+  // devicectl installs either a signed .app bundle or an .ipa archive.
+  if (target === "ios-device" && stat.isFile()) {
+    if (!hasExtension(abs, [".ipa"])) {
+      reject(
+        `App path "${abs}" is a file but not an .ipa. A physical iPhone takes a signed .app bundle ` +
+          `directory or an .ipa. The existing installation was left untouched.`,
+        "reinstall_app_path_wrong_extension"
+      );
+    }
+    if (stat.size === 0 || !(await looksLikeZip(abs))) {
+      reject(
+        `App path "${abs}" is named .ipa but is not a zip archive, so it cannot be installed. Check ` +
+          `the export is complete. The existing installation was left untouched.`,
+        "reinstall_app_path_malformed"
+      );
+    }
+    return abs;
+  }
+
+  if (target === "ios" || target === "ios-device") {
     // A simulator .app is a flat bundle: Info.plist sits at the root. A macOS
     // .app nests it under Contents/, so this also rejects a desktop build.
     if (!stat.isDirectory()) {
@@ -159,10 +178,14 @@ function isInside(parent: string, child: string): boolean {
  * Checked against the device's own set plus every configured additional set,
  * because `deviceSetForUdid` returns null both for "the default set" and for a
  * UDID it has never seen.
+ *
+ * `nativeId` is the directory name CoreSimulator uses. It differs from `udid`
+ * for a device offered by an external provider, whose argent id is namespaced.
  */
 export async function assertNotInsideDeviceContainer(
   absAppPath: string,
-  udid: string
+  udid: string,
+  nativeId: string = udid
 ): Promise<void> {
   const roots = [
     path.join(os.homedir(), "Library", "Developer", "CoreSimulator", "Devices"),
@@ -174,7 +197,7 @@ export async function assertNotInsideDeviceContainer(
   const target = await realpathOrSelf(absAppPath);
 
   for (const root of roots) {
-    const deviceDir = path.join(root, udid);
+    const deviceDir = path.join(root, nativeId);
     const resolved = await realpathOrSelf(deviceDir);
     if (isInside(resolved, target) || isInside(deviceDir, target)) {
       reject(
