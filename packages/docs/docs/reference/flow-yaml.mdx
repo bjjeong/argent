@@ -24,13 +24,14 @@ steps:
   - await: { idle: true }
 ```
 
-The file has three top-level keys:
+The file has four top-level keys:
 
-| Key                     | Required | Description                                                                           |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------- |
-| `steps`                 | yes      | The list of steps. Argent runs the steps in order                                     |
-| `executionPrerequisite` | no       | One sentence that names the start state. Only a fragment can declare it               |
-| `env`                   | no       | Default environment values for scripts. See [Environment values](#environment-values) |
+| Key                     | Required | Description                                                                                     |
+| ----------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `steps`                 | yes      | The list of steps. Argent runs the steps in order                                               |
+| `executionPrerequisite` | no       | One sentence that names the start state. Only a fragment can declare it                         |
+| `env`                   | no       | Default environment values for scripts. See [Environment values](#environment-values)           |
+| `teardown`              | no       | A list of steps that Argent runs after `steps`, also after a failure. See [Teardown](#teardown) |
 
 A flow has one of two shapes:
 
@@ -43,7 +44,7 @@ Argent skips leading `echo` and `script` steps when it classifies a flow. A flow
 
 A file does not store a device id. The runner selects the device. A `launch:` restarts the process but does not clear the app data, the account or the backend data.
 
-When a step fails, Argent stops the flow and reports the later steps as skipped.
+When a step fails, Argent stops `steps` and reports the later steps as skipped. Argent then runs the [teardown list](#teardown).
 
 ## Selectors
 
@@ -109,7 +110,7 @@ On an iOS simulator and Android, an id absent from `describe` can still resolve 
 
 ## Directives
 
-Each step contains one directive. A failed directive stops the flow.
+Each step contains one directive. A failed directive stops its list, `steps` or the teardown list. After `steps` stops, the [teardown list](#teardown) still runs.
 
 | Directive    | Shape                                                              | Description                                                                                       |
 | ------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
@@ -225,7 +226,7 @@ The identity selector must exist only on the destination. `idle` waits until the
 
 `idle` never fails a run. A screen that does not settle passes with a warning. The warning names the reason: the screen kept moving, a small part kept moving, the wait ended mid-hold, the tree stayed empty, only the tree settled, or too few reads. Read the warning before you accept the step.
 
-One outcome stops the run: the runner cannot read the UI tree at all. Argent marks the step as errored and skips the later steps.
+One outcome stops the steps: the runner cannot read the UI tree at all. Argent marks the step as errored and skips the later steps. The [teardown list](#teardown) still runs.
 
 `idle` has no `assert` form and no `when` form.
 
@@ -255,6 +256,8 @@ A `run:` path resolves against the directory of the flow file that contains the 
 
 A fragment whose `run:` chain reaches a launch cannot declare `executionPrerequisite`. Parsing accepts the file, the run rejects it.
 
+A fragment can have its own teardown list. Argent runs that list when the steps of the fragment end. See [Teardown in a fragment](#teardown-in-a-fragment).
+
 ## Snapshots
 
 ```yaml
@@ -277,6 +280,8 @@ Use a snapshot for layout, color, spacing, typography, clipping and icons. Do no
 ```
 
 Use a `script` step for setup or cleanup that device steps cannot do. The script is a local `.mjs` or `.sh` file.
+
+Put a cleanup script in the [teardown list](#teardown). Then Argent also runs the cleanup after a failed step. The recording tools do not write the teardown list. Add it by hand after the recording.
 
 An `.mjs` file runs under Node.js. A `.sh` file runs under Bash. See [Bash scripts](#bash-scripts).
 
@@ -309,13 +314,15 @@ Three entries in the list give access to a credential. Each entry holds the valu
 
 The script log contains stdout and stderr from the script and its commands. Argent keeps at most 64 KiB per step and 256 KiB per flow. The log appears in these places:
 
-- `scriptLog` in the step report. `scriptLogTruncated` is `true` if the log is incomplete.
+- `scriptLog` in the step report. `scriptLogTruncated` is `true` if the log is incomplete. `teardown` is `true` for a teardown step.
 - `log` in the result of `flow-add-script`. `logTruncated` is `true` if the log is incomplete.
 - The output of `argent flow run`, below the step.
 
 If log collection stops before the commands finish, the step report includes a note.
 
-A failed step stops the flow. The verdict names the side that caused the failure.
+Teardown scripts use the same 256 KiB budget as the other steps of the flow. Argent keeps no part of the budget for the teardown list. A large log from earlier steps can leave a teardown script with an empty log. `scriptLogTruncated` then shows `true`.
+
+A failed step stops `steps`. The [teardown list](#teardown) still runs. The verdict names the side that caused the failure.
 
 | Verdict | Cause      | Examples                                                                                                                   |
 | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -408,7 +415,7 @@ Use string values; quote numbers and booleans. Names must match `[A-Za-z_][A-Za-
 
 A `tool: flow-execute` step can pass output values through `args.env`. The parent flow resolves these references before the child flow starts.
 
-Add top-level `env` after recording. Save it before re-recording: `flow-start-recording` clears the whole file.
+Add top-level `env` and `teardown` after recording. Save both before re-recording: `flow-start-recording` clears the whole file.
 
 ### Secrets in an `env` value
 
@@ -481,7 +488,7 @@ Use `??` to supply a fallback path or a literal value. A literal can be a quoted
 - echo: "Region {{output:user.region ?? defaults.region ?? 'unknown'}}"
 ```
 
-If no alternative supplies a value, the step stops the run with an error. This also applies to `when` conditions. References support only paths and `??` fallbacks. Calculate other values in the script.
+If no alternative supplies a value, the step is errored and stops `steps`, as a failed step does. This also applies to `when` conditions. References support only paths and `??` fallbacks. Calculate other values in the script. For a teardown step, see [Missing output values](#missing-output-values).
 
 ### Reference fields
 
@@ -513,6 +520,221 @@ Write secret placeholders directly in the flow file. Do not build them from outp
 Recorded scripts share an output document. Record each script with `flow-add-script`. Use references in its `env` or in the `args` of a later `flow-add-step` call.
 
 Argent resolves these references before the call and saves them for replay. If a reference has no value, the call does not run or record a step. `flow-add-echo` can record an unresolved reference, but its result includes a warning.
+
+## Teardown
+
+The top-level `teardown` key holds a list of steps. A step in this list is a teardown step. Argent runs the teardown list after `steps` ends, also after a failure. Use the teardown list to remove the backend data that the flow made, for example a test order or a test account.
+
+```yaml
+env:
+  API_URL: https://api.example.com
+steps:
+  - script: { path: ../../scripts/seed-order.mjs }
+  - launch: com.example.shop
+  - tap: { text: Checkout }
+
+teardown:
+  - script: { path: ../../scripts/delete-order.sh }
+```
+
+`seed-order.mjs` writes the order id to the [output document](#output-document). `delete-order.sh` reads the id from `$ARGENT_OUTPUT`:
+
+```bash
+set -euo pipefail
+order_id=$(jq -r '.order.id // empty' "$ARGENT_OUTPUT")
+if [ -z "$order_id" ]; then
+  echo "No order was created. Nothing to delete."
+  exit 0
+fi
+curl -fsS -X DELETE "$API_URL/orders/$order_id"
+```
+
+`seed-order.mjs` can stop before it writes the id. For a missing key, `jq -r .order.id` prints `null`. Without `// empty` and the `-z` test, the script sends `DELETE /orders/null`.
+
+### When the teardown list runs
+
+| End of `steps`            | Teardown list          |
+| ------------------------- | ---------------------- |
+| No step failed or errored | Argent runs it         |
+| A step failed or errored  | Argent runs it         |
+| A cancel stopped the run  | Argent does not run it |
+
+A cancel is one of these events:
+
+- You press Ctrl+C during `argent flow run`.
+- The connection between the Argent MCP server and the tool-server closes.
+- The tool-server stops.
+- The caller reaches its [time limit](#time-limit-of-the-caller).
+
+A cancel request from the MCP client does not cancel the run. The run continues, and Argent runs its teardown list.
+
+After a cancel, no teardown step starts. The caller gets no report of the teardown list. The backend data of the cancelled run stays. Write each setup script so that it operates correctly with the data of an earlier run.
+
+A cancel during the teardown list stops the list. The remaining teardown steps do not start.
+
+Argent runs a teardown list only for a flow that started its steps. Argent runs no teardown list in these cases:
+
+- The run stops before its first step. The cause is device resolution, a Chromium boot, a parse error, a [missing teardown secret](#secrets-in-a-teardown-list), or the `executionPrerequisite` notice.
+- Argent skips a `run:` step, finds a cycle at it, or cannot load its file. Argent runs the steps and the teardown list of a fragment only when its `run:` step starts.
+
+A failed or errored teardown step makes a passed run fail. A teardown list that passes does not make a failed run pass:
+
+| `steps`                   | Teardown list                      | `ok` of the run |
+| ------------------------- | ---------------------------------- | --------------- |
+| No step failed or errored | No teardown step failed or errored | `true`          |
+| No step failed or errored | A teardown step failed or errored  | `false`         |
+| A step failed or errored  | Any result                         | `false`         |
+
+### Time limit of the caller
+
+The `argent flow run` command and the Argent MCP server wait at most 5 minutes for data from the tool-server. If a run sends no data for 5 minutes, the caller closes the connection. Argent then cancels the run and does not run its teardown list. Thus the backend data stays.
+
+| Caller                                                                     | The run sends data         | The limit applies to                                                |
+| -------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------- |
+| `argent flow run` for one flow without `--json`, also with `--json-stream` | After each step            | The time before the first step report, and between two step reports |
+| `argent flow run --json`, a directory run, and the MCP `flow-execute` tool | At the end of the run only | The full run time of each flow                                      |
+
+These steps can take 5 minutes before or between step reports:
+
+- A slow script, or a script that waits for a free slot.
+- A `script` step with a `timeout` near 5 minutes. The default [`scripts.maxTimeoutMs`](/docs/reference/configuration#available-keys) is 5 minutes.
+- A `tool: flow-execute` step. The child run sends no step reports to the parent run.
+
+After the cancel, the Argent MCP server sends the same run again, up to 4 more times. Each new run starts at step 1 and runs the setup scripts again. Keep a flow with a teardown list below the 5-minute limit.
+
+### Failures in a teardown list
+
+A teardown list stops at its first teardown step that fails or is errored. Argent does not continue, because a device step operates on the screen that the previous step left. Argent reports each later teardown step of that list as skipped, with a reason:
+
+```text
+did not start: the teardown list stopped at tap "Settings"
+```
+
+A skipped teardown step can leave backend data. Thus the first skipped teardown step that is not an `echo` step also gets a warning. The warning names the skipped teardown steps of the list that are not `echo` steps. The warning names at most 10 steps and then gives the number of the other steps:
+
+```text
+this and 1 more teardown step did not start because the teardown list stopped at tap "Settings": tool stop-all-simulator-servers, script scripts/delete-user.sh. What they clean up can remain
+```
+
+Argent gives no warning when the step that stopped the list is the last step of that list. Argent also gives no warning when only `echo` steps remain. The summary of `argent flow run` counts the warning.
+
+Put the backend cleanup scripts before the device steps in a teardown list. Then an app crash cannot stop the cleanup.
+
+Argent checks the path of a teardown script only when the step starts. An incorrect path shows as a failed teardown step at the end of the run. Read the report of the first run that uses a new teardown list.
+
+### Teardown in a fragment
+
+A fragment can have its own teardown list. Argent runs that list when the steps of the fragment end, before the next parent step. Thus teardown lists run from the inner flow to the outer flow.
+
+The teardown list of a fragment cannot keep data for its parent. For example, a `create-account.yaml` fragment makes an account for the parent. If the fragment deletes the account in its teardown list, the next parent step has no account. Put the cleanup in the teardown list of the flow that uses the data.
+
+A teardown step of a fragment uses the scope of the fragment. It resolves paths against the directory of the fragment. It reads the `env` defaults of the fragment.
+
+If a teardown step of a fragment fails or is errored, Argent skips the remaining parent steps. Argent then runs the teardown list of the parent.
+
+A `run:` step in a teardown list is a teardown step. A failure in its fragment stops that teardown list.
+
+A fragment with only a teardown list must also declare `steps: []`.
+
+### Steps in a teardown list
+
+A teardown list accepts the same steps as `steps`, except `snapshot`:
+
+- Parsing rejects a `snapshot` step in a teardown list, also inside a `when` block. With `--update-baselines`, such a step can store the screen of a failed run as the baseline.
+- A `snapshot` step in a fragment that a teardown `run:` step starts is errored.
+
+Parsing accepts `teardown: []`. Parsing rejects `teardown:` with no value, and any value that is not a list. An output reference error or a `snapshot` error names the teardown step `Teardown step N`. For example, `Teardown step 2.1` is the first step in the `when` block of teardown step 2. Other parse errors of a teardown step do not name its position.
+
+Argent reads only `steps` to find the [shape](#file-shape) of a flow. A `launch:` step in a teardown list does not make a flow end-to-end. Argent does not boot the app of a teardown `launch:` step before step 1. Thus a flow with a Chromium `launch:` step only in its teardown list runs on the device that Argent finds. For such a flow, pass `--device` with a Chromium instance.
+
+On Chromium, these rules apply:
+
+- A teardown `launch:` step always operates as a later launch. It boots a new instance and stops the earlier instance of that app that the run booted.
+- After the teardown list of a fragment, Argent moves the run back to the instance that the run used before that list. If the run booted that instance and the list launched that app again, Argent moves the run to the new instance of the app. If that launch failed, the run stays on the instance that the list used last. When Argent moves the run, Argent also brings the page of that instance to the front.
+
+### Output in a teardown list
+
+Teardown steps read and write the [output document](#output-document) of the run, with the same merge rule as `steps`. A teardown script receives the values that the run saved before it stopped. A `.sh` script reads them from `$ARGENT_OUTPUT`. An `.mjs` script reads the `output` global.
+
+A teardown step cannot remove data that it cannot find. Make each script that makes backend data write the id to the output document. Argent ignores the output of a failed script. Thus a script that fails after it makes backend data must remove that data itself.
+
+A `tool: flow-execute` step starts a separate run with its own output document and its own teardown list. That teardown list cannot read the output of the parent flow. Pass the ids to the child flow through `args.env`.
+
+#### Missing output values
+
+A missing `{{output:…}}` value in a teardown step is an error, as it is in `steps`. The error stops the teardown list. Usually no step wrote the value, because the setup script failed or its `when` block did not run.
+
+Use one of these forms for a value that can be missing:
+
+| Location of the value                                | Form                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| A `.sh` script that reads `$ARGENT_OUTPUT`           | Read the value with `jq -r '.order.id // empty'`. Exit with code 0 when the value is empty. See the example in [Teardown](#teardown) |
+| A script `env` value, a `tool` argument or an `echo` | Add a `??` fallback, for example `?? ''`. Make sure that the step operates with an empty value                                       |
+| A selector, a text check or `type` text              | Put the step in a `when` block. Give the guard reference a fallback that no screen shows, for example `?? '__none__'`                |
+| A `when` guard                                       | Give the reference a fallback that no screen shows, for example `?? '__none__'`                                                      |
+
+```yaml
+teardown:
+  - script:
+      path: ../../scripts/delete-order.sh
+      env: { ORDER_ID: "{{output:order.id ?? ''}}" }
+  - when: { visible: { text: "{{output:order.id ?? '__none__'}}" } }
+    steps:
+      - tap: { text: "{{output:order.id}}" }
+```
+
+A fallback cannot make a selector, a text check or `type` text optional, because these fields reject an empty value. When the value is missing, the `'__none__'` fallback makes the guard false. Argent then skips the block, and the teardown list continues. The references inside the block need no fallback, because Argent enters the block only when the value exists.
+
+This guard form works for an `exists`, `visible` or `text` guard. It does not work for a `hidden` guard, because a missing element makes that guard true.
+
+When an earlier step of the run did not pass, Argent adds a hint to the error reason. The hint names the first step of the run that did not pass: a failed, errored or skipped step. The hint then recommends the form for the location of the value. Argent gives no hint when all earlier steps passed. In that case, the reference or the script is incorrect.
+
+### Secrets in a teardown list
+
+Argent resolves the `{{secret:NAME}}` placeholders of the teardown list before the run starts. Argent then discards the values. A missing secret stops the run before Argent selects a device, boots an app or starts a step. Thus a run on a computer without a CI secret stops before it makes backend data.
+
+Argent checks these fields:
+
+| Field                                                                                  | `<project-root>` of the secret sources   |
+| -------------------------------------------------------------------------------------- | ---------------------------------------- |
+| The `env` values that a teardown `script` step receives                                | The `project_root` of the run            |
+| `type` text                                                                            | The working directory of the tool-server |
+| `args.text` of `tool: keyboard` and `tool: paste`                                      | The working directory of the tool-server |
+| `args.steps[].args.text` of the `keyboard` and `paste` entries in `tool: run-sequence` | The working directory of the tool-server |
+| `args.env` of `tool: flow-execute`                                                     | The `project_root` of that call          |
+
+The `env` values of a script step include the top-level `env`, the run values and the step `env`. A step value or a run value that replaces a top-level placeholder removes that placeholder from the check. For the secret sources, see [Secrets](/docs/reference/configuration#secrets).
+
+Argent also reads the file of each `run:` step in the teardown list. Argent checks the steps and the teardown list of that file. For a fragment that a step in `steps` starts, Argent checks only the teardown list of the fragment, when its `run:` step loads the file. A missing secret there, outside a `when` block, makes the `run:` step errored, and no fragment step starts. Argent checks the steps of that fragment when each step starts.
+
+Argent does not check these placeholders before the run:
+
+- Placeholders inside a `when` block, also in the teardown list of a fragment. Argent does not know the platform before the run, and a guard can skip the block. Argent checks such a placeholder when its step starts.
+- Placeholders in the flow file of a teardown `tool: flow-execute` step.
+- Placeholders in `steps`. Argent checks each of them when its step starts.
+
+### Teardown in the report
+
+Each report of a teardown list holds `teardown: true`. This includes these reports:
+
+- The teardown steps.
+- The `run:` and `when` markers in a teardown list, and the steps of their fragments and blocks.
+- The skipped teardown steps.
+- The teardown list of a fragment inside the parent `steps`.
+
+The `depth` field does not change. The report of each skipped `tool:` step, also in `steps`, holds its `tool` field.
+
+`argent flow run` prints a label line, such as `──── teardown`, before each teardown section. The word `teardown` has the indentation of the section depth. The MCP result shows a `── teardown ──` block at the same position.
+
+When the child run of a `tool: flow-execute` step fails, the reason of that step names the first failed step of the child run. If a teardown step of the child run failed after it, the reason also names that teardown step.
+
+### Record a teardown list
+
+The recording tools do not write the `teardown` key. Add the teardown list by hand after the `flow-finish-recording` call. `flow-start-recording` clears the whole file. Save the teardown list before a new recording, and add it again after the recording.
+
+On a co-located tool-server, `flow-add-step`, `flow-add-script` and `flow-add-echo` keep a `teardown` list that the file already holds. On a tool-server on a different machine, each recording call replaces the whole file. There, add `teardown` only after the `flow-finish-recording` call.
+
+A teardown script has no recorded form. To run a cleanup script live, record it with `flow-add-script`. After `flow-finish-recording`, move the step from `steps` to `teardown` by hand.
 
 ## The `argent flow` command
 
@@ -570,12 +792,14 @@ A directory run with `--json` writes one document. The document holds `ok`, `tot
 
 A single flow run with `--json` writes the report of that flow. When the run gets no report, Argent puts the reason on stderr instead. Use `--json-stream` to get the failure as a record.
 
+In `--json` and `--json-stream` output, each step report of a teardown list holds `teardown: true`. A CI job can use this field to tell a teardown failure from a step failure. See [Teardown in the report](#teardown-in-the-report).
+
 Pin `--platform` and `--device` on iOS, Android and Vega. On Chromium, pass `--platform chromium` and omit `--device`. Then the runner boots the declared app path with a reproducible window size.
 
 ## Remote runs
 
-The `flow-execute` tool takes one flow source: `name` for a saved flow, or `flow_path` for any file. `run:` targets and baselines resolve on the file system of the tool-server. When the tool-server runs on a different machine, a `name` run sends only that one file. Argent checks the whole flow before it runs any step, and rejects a `run:`, `script:` or `snapshot` step at any depth with an error about the missing co-location, not about a missing fragment, script or baseline. `flow_path` is refused when the agent and the tool-server do not share a file system.
+The `flow-execute` tool takes one flow source: `name` for a saved flow, or `flow_path` for any file. `run:` targets and baselines resolve on the file system of the tool-server. When the tool-server runs on a different machine, a `name` run sends only that one file. Argent checks the whole flow before it runs any step. Argent rejects a `run:`, `script:` or `snapshot` step at any depth, also in the teardown list. The error names the missing co-location, not a missing fragment, script or baseline. The tool-server refuses `flow_path` when the agent and the tool-server do not share a file system.
 
 ## YAML safety
 
-Quote a string that contains `#`, `:` or quotes. Quote a value that holds an `{{output:…}}` reference. Quote a number, `true` or `false` in a text slot. Use single quotes for a regex with backslashes. Parsing rejects an unknown directive, an invalid selector, an invalid regex, `else`, an unsupported option, and an end-to-end flow that declares `executionPrerequisite`.
+Quote a string that contains `#`, `:` or quotes. Quote a value that holds an `{{output:…}}` reference. Quote a number, `true` or `false` in a text slot. Use single quotes for a regex with backslashes. Parsing rejects an unknown directive, an invalid selector, an invalid regex, `else`, an unsupported option, and an end-to-end flow that declares `executionPrerequisite`. Parsing also rejects an unknown top-level key, a `teardown` value that is not a list, and a `snapshot` step in a teardown list.

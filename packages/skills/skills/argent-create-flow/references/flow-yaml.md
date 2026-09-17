@@ -20,6 +20,11 @@ Read this reference when polishing, composing, or manually reviewing a flow.
     - [The output document](#the-output-document)
     - [References](#references)
     - [Recording script output](#recording-script-output)
+  - [Teardown](#teardown)
+    - [When the list runs](#when-the-list-runs)
+    - [Failures and order](#failures-and-order)
+    - [Teardown output](#teardown-output)
+    - [Secrets, reports, and recording](#secrets-reports-and-recording)
   - [Snapshots and standalone runs](#snapshots-and-standalone-runs)
   - [YAML safety](#yaml-safety)
 
@@ -31,6 +36,8 @@ steps:
   - await: { visible: { id: home-screen } }
   - await: { idle: true }
 ```
+
+The top-level keys are `steps` (required), `executionPrerequisite`, `env`, and [`teardown`](#teardown). Parsing rejects any other key.
 
 An e2e flow has a literal `launch:` as its first step that is not `echo:` or `script:`. It cannot declare `executionPrerequisite`. Put the named start state in a leading echo.
 
@@ -45,7 +52,7 @@ steps: []
 
 Flows never store a device id. The runner binds the device. `launch:` restarts the process but does not clear app, account, or backend data.
 
-The one exception is a device _scope_ rather than a target: `stop-all-simulator-servers`' `devices` list **is** kept in the YAML, because without it the step means the machine-wide sweep and would tear down devices other agents are mid-session on. Replay rebinds a recorded scope only when you pass `device` explicitly — an auto-detected device would retarget the teardown at a device the flow never named. So the recorded ids are what run when you replay without `device`; on another host they reap nothing and come back in `unmatched`, so re-record the cleanup flow there or pass `device`. A step that recorded no scope is narrowed onto the run's device **only when the run resolved one**. A cleanup flow whose only step is that teardown needs no device, so with none or several booted it resolves none, replays as the machine-wide sweep, and still reports a pass. Record the scope, or pass `device` at replay, whenever the sweep must stay confined.
+The one exception is a device _scope_ rather than a target: `stop-all-simulator-servers`' `devices` list **is** kept in the YAML, because without it the step means the machine-wide sweep and would tear down devices other agents are mid-session on. Replay rebinds a recorded scope only when you pass `device` explicitly — an auto-detected device would retarget a `stop-all-simulator-servers` step at a device the flow never named. So the recorded ids are what run when you replay without `device`; on another host they reap nothing and come back in `unmatched`, so re-record the cleanup flow there or pass `device`. A step that recorded no scope is narrowed onto the run's device **only when the run resolved one**. A cleanup flow whose only step is a `stop-all-simulator-servers` step needs no device, so with none or several booted it resolves none, replays as the machine-wide sweep, and still reports a pass. Record the scope, or pass `device` at replay, whenever the sweep must stay confined.
 
 ## Selectors
 
@@ -114,7 +121,7 @@ Scopes can combine and nest, with at most six scope keys. Use strict selectors f
 
 ## Directives
 
-Directives stop the flow on failure and skip later steps. The available directives are `launch`, `tap`, `long-press`, `swipe`, `type`, `scroll-to`, `pinch`, `rotate`, `await`, `assert`, `wait`, `snapshot`, `run`, `script`, `when`, `echo`, and `tool`.
+A directive that fails or errors stops its list, `steps` or a teardown list: the later entries skip. After `steps` stops, the [teardown lists](#teardown) still run. The available directives are `launch`, `tap`, `long-press`, `swipe`, `type`, `scroll-to`, `pinch`, `rotate`, `await`, `assert`, `wait`, `snapshot`, `run`, `script`, `when`, `echo`, and `tool`.
 
 Use the launch map for cross-platform flows. A bare launch applies everywhere and becomes an app path on Chromium. The map takes `native:`, `ios:`, `android:`, `vega:`, and `chromium:`. `native:` is one id shared by iOS, Android, and Vega, and a per-platform key overrides it for that platform. `chromium:` accepts a relative or absolute app path. A launch that declares no id for the run's platform is an error, not a cue to switch platforms. On iOS, a successful launch also pins later tree reads to that app until the next raw `tool:` step, so read [The runner tree is not the discovery tree](#the-runner-tree-is-not-the-discovery-tree) when a read describes the wrong screen.
 
@@ -210,7 +217,7 @@ It **never fails a run.** Every outcome short of a clean settle passes with a wa
 - **settled on the UI tree alone** — no screenshot pair could be read, so presentation-layer animation was never waited out.
 - **too few reads** — a settle needs three reads across two intervals and this step got fewer, so it ended with no evidence either way.
 
-Only a tree source this step could not read stops the run, as an errored step — one still failing when the wait ends, one that wedges after answering, one that answers with an empty tree it flags as degraded (an unattached Vega toolkit, an AX service asking to be relaunched), or one that never answers (raise `timeout` before suspecting the app). The run is then not ok and every later step is skipped. A single failed read is not that: the hold restarts from the next good read. The same outage stops no [selector-less gesture](#directives), which needs no frame and passes with its own warning instead.
+Only a tree source this step could not read stops the run, as an errored step — one still failing when the wait ends, one that wedges after answering, one that answers with an empty tree it flags as degraded (an unattached Vega toolkit, an AX service asking to be relaunched), or one that never answers (raise `timeout` before suspecting the app). The run is then not ok and every later step is skipped; the [teardown lists](#teardown) still run. A single failed read is not that: the hold restarts from the next good read. The same outage stops no [selector-less gesture](#directives), which needs no frame and passes with its own warning instead.
 
 `idle` proves readiness only and never identifies the screen, so it cannot serve as acceptance evidence or replace the identity gate. Gate the next action on a stable element. Add `idle` during polish after each screen change, not after every step.
 
@@ -260,7 +267,7 @@ If a script fails, check its changes before you retry.
 
 For Bash scripts, a nonzero exit code fails the step. Write failure explanations to stderr.
 
-A script can return data for later steps. See [Script output](#script-output).
+A script can return data for later steps. See [Script output](#script-output). Put a cleanup script in the [teardown list](#teardown).
 
 ## Environment values
 
@@ -303,7 +310,7 @@ A script can return data for later steps. Use `{{output:path}}` to read it:
 
 - In `.mjs`, read or change the `output` object, for example `output.user = { displayName: "Test user" };`.
 - In `.sh`, write a JSON object to the file at `$ARGENT_OUTPUT`. The file initially contains the current document. If a command also reads this file, write to a second file first. Then move the second file to `$ARGENT_OUTPUT`.
-- Each run starts with an empty document. Nested `run:` flows and `when` blocks share it. A `tool: flow-execute` step has a separate document.
+- Each run starts with an empty document. Nested `run:` flows, `when` blocks and teardown steps share it. A `tool: flow-execute` step has a separate document.
 - After a successful script, each returned top-level key replaces its previous value, including nested values. Other keys keep their values. To clear a key, set it to `null`. Failed scripts do not update the document.
 - Use JSON values. Keep the combined document and each script's output at or below 1 MiB. Use strings for identifiers, prices and codes.
 
@@ -325,6 +332,55 @@ A script can return data for later steps. Use `{{output:path}}` to read it:
 4. Check warnings from `flow-add-echo`: it can record an unresolved reference.
 5. Replay the final flow. A fragment recorded through `flow-execute` starts with its own output document during recording. Its saved `run:` step shares the parent document at replay.
 
+## Teardown
+
+A top-level `teardown` list holds cleanup. Each entry is a **teardown step**, written like a step in `steps`.
+
+```yaml
+steps:
+  - script: { path: ../../scripts/seed-order.mjs }
+  - launch: com.example.shop
+  - tap: { text: Checkout }
+teardown:
+  - script:
+      path: ../../scripts/delete-order.sh
+      env: { ORDER_ID: "{{output:order.id ?? ''}}" }
+```
+
+`teardown` must be a list; a bare `teardown:` is rejected. A flow with only a teardown still needs `steps: []`.
+
+### When the list runs
+
+- The list runs after `steps` ends with pass, fail, or error. A cancel skips it: Ctrl+C, a closed MCP connection, or a tool-server stop. No teardown step starts, no caller sees a report of the list, and the backend data stays. Write setup that tolerates data from an earlier run.
+- A caller closes a run that sends no output for 5 minutes, and Argent treats that as a cancel. MCP then sends the run again, up to 4 more times, and each retry runs the setup scripts again. MCP, `--json`, and directory runs send nothing until the run ends, so keep them under 5 minutes. A streamed CLI run of one flow is cut when 5 minutes pass with no step report, before the first report or between two reports, for example during a slow script or a `tool: flow-execute` step.
+- No teardown runs when the run stops before its first step (device resolution, a Chromium boot, a parse error, an unknown teardown secret, the `executionPrerequisite` notice), or for a `run:` step that skipped or could not load its file.
+- A `run:` fragment's teardown runs when the fragment's steps end, before the parent's next step. It cannot keep data alive for the parent: put cleanup of data that later steps use in the teardown of the flow that uses it.
+
+### Failures and order
+
+- The list stops at its first `fail` or `error`. The first skipped teardown step that is not an `echo` carries a warning that names the teardown steps that did not start, echoes left out, at most ten and then a count. What they clean up can remain.
+- A failed run stays failed when its teardown passes. A passing run fails when a teardown step fails or errors.
+- If a fragment's teardown step fails or errors, the parent's remaining steps skip and the parent's teardown still runs.
+- Put backend cleanup scripts before device steps, so an app crash cannot stop the cleanup.
+- Parsing rejects a `snapshot` teardown step, also inside `when`. A `snapshot` that a teardown `run:` reaches errors.
+- A teardown `launch:` does not make a flow e2e. On Chromium it always boots a new instance. After a fragment's teardown the run returns to the instance it was on. If the run booted that instance and the teardown launched its app again, the run moves to the app's new instance; if that launch failed, the run stays where the teardown left it.
+
+### Teardown output
+
+- Teardown scripts read the run's output document, so they see what the run committed before it stopped. A teardown cannot remove data it cannot see: a script that creates backend data writes its id to `output`. A failed script commits no output, so it must clean up its own partial data.
+- In `.sh`, read the id with `jq -r '.order.id // empty' "$ARGENT_OUTPUT"` and exit 0 when it is empty; a plain `.order.id` prints `null`. Alternatively, pass it through `env` with `?? ''`, as above, and handle an empty value.
+- A missing `{{output:…}}` value errors the teardown step and stops the list. When an earlier step did not pass, the reason names that step. Give each teardown reference that can miss a fallback:
+  - `?? ''` in a script `env` value, a `tool` argument, or an `echo`.
+  - Selectors, expected text, and `type` text reject an empty value. Guard such a step with a `when` whose reference falls back to a value no screen shows, for example `when: { visible: { id: "order-{{output:order.id ?? '__none__'}}" } }`, or move the cleanup into a script. This guard works for `visible`, `exists`, and `text`, not `hidden`.
+- A `tool: flow-execute` step starts a separate run with its own output document and teardown. Pass ids to it in `args.env`.
+
+### Secrets, reports, and recording
+
+- Argent resolves teardown `{{secret:NAME}}` placeholders before the first step. An unknown name refuses the run; in a fragment, it errors the `run:` step. The check covers teardown script `env` (merged with top-level `env` and run values), `type` text, `keyboard` and `paste` text (also inside `run-sequence`), `flow-execute` `args.env`, and teardown `run:` targets. Placeholders inside teardown `when` blocks, a fragment's included, are checked only when their own step runs.
+- Teardown scripts share the run's 256 KiB log budget. Heavy logging earlier can leave a teardown log empty (`scriptLogTruncated`).
+- Each teardown report carries `teardown: true` in `--json` and `--json-stream`. The CLI prints a `──── teardown` line and the MCP result a `── teardown ──` line before each teardown section.
+- The recorder never writes `teardown:`. Record a cleanup script at the end of the walkthrough if it must run live, then move it under `teardown:` after `flow-finish-recording`, or write the teardown step there. `flow-start-recording` resets the file: save `env` and `teardown` first and restore them after the finish. A remote recording rewrites the whole file on each call, so add `teardown:` only after the finish.
+
 ## Snapshots and standalone runs
 
 `argent flow run <name> [--device <id>] [--platform ios|android|chromium|vega] [--update-baselines] [--output <dir>] [--env NAME=value] [--json]` runs without an LLM and exits non-zero on failure. Repeat `--env` for each variable; quote values with spaces: `--env "LABEL=Test account"`.
@@ -339,4 +395,4 @@ Pin `--platform` and `--device` for iOS, Android, or Vega. For Chromium the devi
 
 ## YAML safety
 
-Quote strings containing `#`, `:`, quotes, or `{{output:…}}`. Quote numbers and `true` or `false` in text slots. Use single quotes for regexes with backslashes. Parsing rejects invalid directives, selectors, regexes, `else`, unsupported options, and e2e flows that also declare `executionPrerequisite`.
+Quote strings containing `#`, `:`, quotes, or `{{output:…}}`. Quote numbers and `true` or `false` in text slots. Use single quotes for regexes with backslashes. Parsing rejects unknown top-level keys, invalid directives, selectors, regexes, `else`, unsupported options, a `snapshot` teardown step, and e2e flows that also declare `executionPrerequisite`.

@@ -25,7 +25,7 @@ const LIVE_AUTHORING = path.resolve(
   "../../../skills/skills/argent-create-flow/references/live-authoring.md"
 );
 const SPELLED = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
-const RULE_5_INSERTIONS = ["`snapshot:`", "`await: { idle: true }`", "Chromium"];
+const RULE_5_INSERTIONS = ["`snapshot:`", "`await: { idle: true }`", "Chromium", "`teardown:`"];
 const INSERTION_COUNT_CITATIONS = [
   path.resolve(__dirname, "../../../skills/skills/argent-qa-flows/SKILL.md"),
 ];

@@ -178,7 +178,7 @@ A bare `NAME=value` line in `.env` or `.env.local` stays unresolved. Write `ARGE
 
 A change in a secrets file applies to the next tool call. An environment variable reaches only a tool-server that started after you exported the variable.
 
-A missing secret fails the step. A missing secret in `--env` or the `flow-execute` `env` parameter prevents the run from starting. Argent hides resolved secrets in failure text and script logs. See [Secrets in an `env` value](/docs/reference/flow-yaml#secrets-in-an-env-value) for the limits. Do not use a placeholder for content that a report must show.
+A missing secret fails the step. A missing secret in `--env` or the `flow-execute` `env` parameter prevents the run from starting. A missing secret in the teardown list of the flow, outside a `when` block, also prevents the run from starting. A missing secret in the teardown list of a fragment, outside a `when` block, makes its `run:` step in `steps` errored. See [Secrets in a teardown list](/docs/reference/flow-yaml#secrets-in-a-teardown-list). Argent hides resolved secrets in failure text and script logs. See [Secrets in an `env` value](/docs/reference/flow-yaml#secrets-in-an-env-value) for the limits. Do not use a placeholder for content that a report must show.
 
 ### Commands
 

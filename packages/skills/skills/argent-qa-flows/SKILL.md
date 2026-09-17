@@ -17,8 +17,8 @@ Load `argent-create-flow` as the authoring engine. Follow its required reference
 
 A QA flow is complete only when:
 
-1. The first step that is not `echo:` or `script:` is `launch:`. In-flow setup proves a deterministic data baseline. Repeated runs do not accumulate artifacts or require manual cleanup.
-2. The first walkthrough recorded every action and live structural check. Only the three documented polish insertions are unrecorded.
+1. The first step that is not `echo:` or `script:` is `launch:`. In-flow setup proves a deterministic data baseline. Repeated runs, also after a failed run, do not accumulate artifacts or require manual cleanup.
+2. The first walkthrough recorded every action and live structural check. Only the four documented polish insertions are unrecorded.
 3. Every requirement maps to a hard `await:`, `assert:`, or reviewed `snapshot:`. Echoes and screenshots are not verdicts. A negative check needs the same stable selector established as visible earlier.
 4. Every screen change has destination identity followed by `idle` readiness.
 5. Targets satisfy the stable-selector and coordinate-fallback rules. QA keeps coordinates only for genuinely unlabeled targets. Vacuous on Vega, which has no coordinate targets.
@@ -43,12 +43,12 @@ Make repeated runs deterministic:
 1. Inspect the required baseline without mutation.
 2. If the account is dirty, record a safe reset or seed flow. Alternatively, include safe normalization in setup.
 3. After setup navigation, echo the named baseline and hard-check it before the first scenario mutation. Use `assert:` or a destination `await:` that fully proves the baseline.
-4. Prefer to restore the baseline at the end.
+4. Restore the baseline in the top-level `teardown:` list, not in the last steps. A failure skips the remaining steps, but the teardown list still runs, so the next run starts clean. Put backend cleanup scripts first. Start device cleanup with a `launch:` or a reset flow that launches, because a failure can leave any screen. See [Flow YAML: Teardown](../argent-create-flow/references/flow-yaml.md#teardown).
 
-A flow has two fixture mechanisms:
+A flow has two fixture mechanisms. Use them for setup in `steps` and for cleanup in `teardown:`:
 
 - `run:` replays a separately recorded reset or seed flow.
-- `script:` runs requested local setup or cleanup. Record it with `flow-add-script` where it belongs in the walkthrough. Put defaults in the flow's top-level `env` so `--env` can replace them for each run. Use `{{secret:NAME}}` for credentials. See [Environment values](../argent-create-flow/references/flow-yaml.md#environment-values).
+- `script:` runs requested local setup or cleanup. Record it with `flow-add-script`: setup where it belongs in the walkthrough, cleanup at the end. Move cleanup under `teardown:` after `flow-finish-recording`. A setup script that creates backend data writes its id to `output`, so the teardown script can find the data. Put defaults in the flow's top-level `env` so `--env` can replace them for each run. Use `{{secret:NAME}}` for credentials. See [Environment values](../argent-create-flow/references/flow-yaml.md#environment-values).
 
 Ask before cleanup that creates or deletes meaningful user data outside the request.
 
@@ -64,9 +64,9 @@ Ticket: select Dark in Settings. Verify Dark is selected, Light is absent, and t
 | Prove Dark selected   | Tap `theme-dark-option`  | `await: { visible: { id: theme-dark-selected } }`                           | Theme becomes Dark    |
 | Prove Light absent    | Inspect settled screen   | `assert: { hidden: { id: theme-light-selected } }`                          | None                  |
 | Verify dark rendering | Inspect settled screen   | `snapshot: settings-dark`                                                   | None                  |
-| Restore baseline      | Tap `theme-light-option` | `await: { visible: { id: theme-light-selected } }`                          | Next run starts clean |
+| Restore baseline      | Teardown: run reset flow | Reset flow's `await: { visible: { id: theme-light-selected } }`             | Next run starts clean |
 
-The initial Light check establishes the selector used by the later `hidden` check. The final restore makes pass 2 independent.
+The initial Light check establishes the selector used by the later `hidden` check. The reset flow is a separately recorded e2e flow, `qa-reset-theme`: launch, open Settings, tap `theme-light-option`, and check the Light selection. Its `run:` step is in `teardown:`, so it also runs after a failed pass. It launches first, so it does not depend on the screen that a failure left.
 
 ## 2. Record the scenario
 
@@ -92,13 +92,13 @@ Complete the create-flow polish and blocking audit. Then:
 
 1. Map every contract row to an executed action or hard check.
 2. Build a navigation table with one row per screen change, naming both the identity gate and the readiness gate. A row missing either is a blocking defect.
-3. Confirm setup and end state permit an immediate second run.
+3. Confirm setup and teardown permit an immediate second run, also after a failed run.
 
 | Action             | Destination | Identity                  | Readiness |
 | ------------------ | ----------- | ------------------------- | --------- |
 | Tap `settings-tab` | Settings    | `settings-screen` visible | `idle`    |
 
-The two are repaired differently. A missing identity check must be recorded live on the restored screen. A missing `idle` check is added in YAML, because `await: { idle: true }` has no recorder form and is one of `argent-create-flow`'s three permitted polish insertions. Re-record any missing action or other structural check.
+The two are repaired differently. A missing identity check must be recorded live on the restored screen. A missing `idle` check is added in YAML, because `await: { idle: true }` has no recorder form and is one of `argent-create-flow`'s four permitted polish insertions. Re-record any missing action or other structural check.
 
 ## 5. Prove two consecutive passes
 
@@ -106,11 +106,11 @@ After the last edit and audit, set the streak to zero:
 
 1. Choose one runner for both passes. Use `flow-execute` locally or `argent flow run <name> --platform <platform>` for CI. Switching runners resets the streak.
 2. Seed, review, and freeze snapshot baselines. Baseline updates do not count as passes.
-3. Before mobile pass 1, recycle Argent services for this flow's device: two warm passes are correlated evidence, because a fixed timing margin can pass twice simply because environment speed did not change. Scope `stop-all-simulator-servers` to `devices: [<device>]`. Never omit the scope — a bare call is the machine-wide sweep, and step 7 restarts this proof often enough to reap every other agent's devices repeatedly. Use the MCP call for `flow-execute`, or `argent run stop-all-simulator-servers --devices <device>` from the standalone runner's install. The reset must not change app or account data. For Chromium, let the runner boot the declared app and omit `device`. Vega owns no recyclable Argent services, so the teardown is a no-op there and both passes are warm.
+3. Before mobile pass 1, recycle Argent services for this flow's device: two warm passes are correlated evidence, because a fixed timing margin can pass twice simply because environment speed did not change. Scope `stop-all-simulator-servers` to `devices: [<device>]`. Never omit the scope — a bare call is the machine-wide sweep, and step 7 restarts this proof often enough to reap every other agent's devices repeatedly. Use the MCP call for `flow-execute`, or `argent run stop-all-simulator-servers --devices <device>` from the standalone runner's install. The reset must not change app or account data. For Chromium, let the runner boot the declared app and omit `device`. Vega owns no recyclable Argent services, so the `stop-all-simulator-servers` call is a no-op there and both passes are warm.
 4. Run from the flow's launch and setup without baseline-update mode. Count a pass only when `ok: true` and every acceptance check executed. A false `when:` can skip optional setup only. An errored step does not advance the streak, and the count mixes two kinds — read each reason. One that could not run (an unreadable tree under `idle`, an unresolvable `run:` target) is environment: fix it and rerun. **A failed `launch:` also scores `errored`, and it is a verdict about the app** — an app that no longer installs or starts is the regression this test exists to catch, so report it instead of rerunning.
 5. Resolve every passing-step warning before completion. Also resolve recorded-wait warnings from `flow-finish-recording`. Follow [Live waits and checks](../argent-create-flow/references/live-authoring.md#live-waits-and-checks). For runner warnings, `await: { idle: true }` raises [six different warnings](../argent-create-flow/references/flow-yaml.md#idle-readiness), so read which one it is first. Two say the screen was moving. One says the wait ran out mid-hold and needs a larger `timeout:`. One says the tree stayed empty. One — **settled on the UI tree alone** — says the hierarchy did hold still and only the screenshot pairs were missing, so inspect the capture path rather than the app's rendering. One says the step ended with no evidence either way. Inspect the screen, disclose the cause, and verify that surrounding acceptance checks use stable elements rather than stillness. A [selector-less gesture](../argent-create-flow/references/flow-yaml.md#directives) — a coordinate `tap`/`long-press`/`swipe`, or a `pinch`/`rotate` with no `on:` — warns in a different shape: a tree-source outage left it unsettled, so it dispatched blind and the green says only that the gesture was sent. Restore the tree source, usually by relaunching the app so the instrumentation loads, and rerun. Accepting that warning needs an app that serves no tree, which cannot satisfy this contract anyway.
 6. Run the same YAML again immediately with the same runner. Do not manually reset app or account data.
-7. Reset the streak after any failure, edit, re-recording, baseline update, or state-changing manual recovery. Repair through `argent-create-flow`, audit again, and restart with fresh services.
+7. Reset the streak after any failure, edit, re-recording, baseline update, or state-changing manual recovery. Repair through `argent-create-flow`, audit again, and restart with fresh services. The teardown list restores the baseline after a failed run, so two consecutive passes need no manual data reset. A canceled run skips its teardown: run the cleanup before you restart.
 
 Finish only when the streak reaches two. If the intended runner is unavailable, report proof as blocked. If product behavior fails, keep the strong check and report the regression. Never weaken it to obtain green output.
 
@@ -123,7 +123,7 @@ Report:
 - Flow name, path, platform, and standalone command.
 - Contract rows mapped to actions and checks.
 - Navigation table.
-- Baseline setup, end-state restoration, and accepted data dependencies.
+- Baseline setup, teardown restoration, and accepted data dependencies.
 - Both pass results, runner, fresh-service setup, and resolved warnings.
 - Snapshot scope, reviewed baseline status, and mismatch tolerance.
 - Coordinate or raw-gesture exceptions.

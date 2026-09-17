@@ -149,7 +149,7 @@ Once you discover the correct build/run workflow for a project, **save it to pro
 | Open a URL / deep link     | `open-url` tool (pass device id + URL)                                                                                                                                                                     |
 | Rotate device              | `rotate` tool                                                                                                                                                                                              |
 | Stop simulator server      | `stop-simulator-server` tool (iOS UDID or Android serial — one device)                                                                                                                                     |
-| Stop all simulator servers | `stop-all-simulator-servers` tool — pass `devices: [...]` to scope the teardown to this session's devices (an unscoped call also tears down other agents' devices; use it only for a machine-wide cleanup) |
+| Stop all simulator servers | `stop-all-simulator-servers` tool — pass `devices: [...]` to scope the shutdown to this session's devices (an unscoped call also tears down other agents' devices; use it only for a machine-wide cleanup) |
 
 For full simulator setup workflow, refer to the `argent-ios-simulator-setup` skill.
 

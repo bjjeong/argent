@@ -47,7 +47,7 @@ A fragment declares its start state in a prerequisite. The prerequisite is a sen
 
 A flow can contain more than taps and text. A step can wait for an element, wait for the screen to settle, check a condition, take a screenshot and compare it to a baseline, run a different flow, or run a local script. See [Baselines in flows](/docs/features/visual-regression#baselines-in-flows) for the screenshot comparison.
 
-Use a local script for setup or cleanup that device steps cannot do. A script is an `.mjs` file or a `.sh` file. Ask the agent to add the script at the required point in the flow.
+Use a local script for setup or cleanup that device steps cannot do. A script is an `.mjs` file or a `.sh` file. Ask the agent to add a setup script at the required point in the flow. Put a cleanup script in the teardown list of the flow. See [Cleaning up after a replay](#cleaning-up-after-a-replay).
 
 A script can return data for later steps, such as a new user's name. See [Script output](/docs/reference/flow-yaml#script-output).
 
@@ -57,9 +57,19 @@ The file is plain text. You can commit the file, review the file in a pull reque
 
 ## Replaying a flow
 
-You ask the agent to run a flow by its name. The agent replays each step in order on the connected device. When a step fails, Argent stops the flow. Argent reports the later steps as skipped. At the end, the agent receives a report with the result of each step.
+You ask the agent to run a flow by its name. The agent replays each step in order on the connected device. When a step fails, Argent stops the steps. Argent reports the later steps as skipped. Argent then runs the teardown list of the flow. At the end, the agent receives a report with the result of each step.
 
 A flow also runs without an agent. The `argent flow run` command replays a flow from the terminal. The command prints the result of each step and exits with a status code. Thus a flow runs in a CI job or in a script. The command runs one flow, a flow file in a different location, or all flows in a directory.
+
+## Cleaning up after a replay
+
+A flow can make backend data, for example a test order or a test account. A flow can end with a teardown list that removes this data. A step in this list is a teardown step. Argent runs the teardown list after the steps, also when a step fails. Thus a failed replay does not leave its data for the next replay.
+
+A teardown step usually runs a cleanup script. The script reads the ids that the setup script saved during the replay. Thus the cleanup removes only the data of this replay.
+
+When a teardown step fails, Argent stops the teardown list, and the replay fails. The report names the teardown steps that did not start. A fragment runs its own teardown list when its steps end. Argent does not run the teardown list after you cancel a replay.
+
+The agent does not record the teardown list. You or the agent add the teardown list to the file after the recording. See [Teardown](/docs/reference/flow-yaml#teardown) for the rules.
 
 ## Example instructions
 
@@ -68,13 +78,16 @@ A flow also runs without an agent. The `argent flow run` command replays a flow 
 - "Run the login flow on the iOS simulator and on the Android emulator. Compare the results."
 - "Add a label before each screen change in the onboarding flow."
 - "Record the checkout flow. Before the app starts, seed the cart with `scripts/seed-cart.mjs`."
+- "Add a teardown list to the checkout flow. It must delete the test order with `scripts/delete-order.sh`."
 - "Profile the app while you run the search flow. Then apply my fix and run the flow again."
 
 ## Limits
 
 - A replay runs on one booted device. When more than one device is booted, name the device in the instruction. A physical iPhone is never chosen automatically, even when nothing else is booted: name it in the instruction.
 - A recorded tap with coordinates breaks when the layout changes. Give the element a stable text or identifier, then record the step again.
-- A flow does not reset the data of the app. When a step creates data, for example a new item, each replay creates the data again. Start the flow with a launch of the app or with a step that restores a known state.
+- A flow does not reset the data of the app. When a step creates data, for example a new item, each replay creates the data again. Start the flow with a launch of the app or with a step that restores a known state. To remove backend data after each replay, add a teardown list to the file after the recording.
+- A cancelled replay does not run its teardown list, and its backend data stays. Write each setup script so that it accepts the data of an earlier replay.
+- The agent and the `argent flow run` command wait at most 5 minutes for data from a replay. After 5 minutes without data, Argent cancels the replay. See [Time limit of the caller](/docs/reference/flow-yaml#time-limit-of-the-caller).
 - The agent records a launch step for iOS, Android and Vega apps. For a Chromium or Electron app, add the launch step to the file by hand.
 - A replay needs the same connected instrumentation as the recording. When the agent cannot read the UI tree, a step that still uses coordinates sends the tap anyway and adds a warning. A step that uses a stable identifier fails instead, because it has no coordinates to fall back on.
 

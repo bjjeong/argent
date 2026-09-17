@@ -34,7 +34,11 @@ A recorded `flow-execute` has two names. The top-level `name` identifies the rec
 
 A `run:` step omits the call's `env` and inherits the recording's environment at replay. If the recorder warns about different values, put the required values in the sibling flow's top-level `env`. To keep the raw `flow-execute` call and its `env`, record with `delayMs: 0`.
 
+If the live `flow-execute` run failed, for example in the sibling flow's teardown, the recorder still appends the step and warns: at replay that failure stops the run at this step. Repair the sibling flow, record the call again, and remove the failed step after finishing.
+
 When the user requests a script, call `flow-add-script` where it must run. Use a local `.mjs` or `.sh` file. Read [Flow YAML: Local scripts](flow-yaml.md#local-scripts) first. If the call fails, check its changes before you retry.
+
+The recorder never writes `teardown:`. Record a requested cleanup script at the end of the walkthrough, then move it under `teardown:` after `flow-finish-recording`. See [Flow YAML: Teardown](flow-yaml.md#teardown).
 
 `flow-add-script` saves its `env` on the step, overriding even replay's `--env`. Put defaults that must vary per run in top-level `env` after recording. See [Environment values](flow-yaml.md#environment-values).
 
@@ -45,7 +49,7 @@ Obey these lifecycle rules:
 1. Pass the same `name` and absolute `project_root` to every recording tool.
 2. Choose a name unique to the task. Another caller can take over the same pair without an ownership check. The pair is keyed by the file the filesystem resolves to, not the spelling you passed, so a differently-cased name or a symlinked `.argent/flows` collides too. That collision is reported: the second start says `restarted`, and the first recording's next call fails naming both spellings.
 3. Give concurrent recordings separate devices. Their files are isolated, but their live device actions are not.
-4. Treat `flow-start-recording` as destructive. It always truncates the named YAML, including a finished or committed flow. Save the top-level `env` before you record again. Restore it after recording. `restarted` reports only a displaced live take.
+4. Treat `flow-start-recording` as destructive. It always truncates the named YAML, including a finished or committed flow. Save the top-level `env` and `teardown` before you record again. Restore them after `flow-finish-recording`. `restarted` reports only a displaced live take.
 5. If a call says the recording is inactive, do not restart under that name. The completed take can still be on disk. Copy it aside or record under a fresh name.
 6. Inspect `toolResult`, `message`, and `recorded` after each call. A call that errors records nothing, but a call that returns normally while reporting an unmet condition **does** append the step, and `message` says the step was added either way. A failed `flow-add-script` call appends nothing. `await-ui-element` is the case that turns up in practice (see [Live waits and checks](#live-waits-and-checks)). Only `flow-start-recording` and `flow-finish-recording` return the whole YAML as `flowFile`. A step call returns `recorded` — one summary line for the step it appended — plus a running `stepCount`. Read `recorded`: the recorder does not always store the tool call you made, and that line is where a rewrite shows up. To see the whole file mid-recording, read it at `savedTo`. A `savedTo` that comes back `null` means the write failed on your side. The step is still in the recording, so continue: the next step rewrites the whole file, and `flow-finish-recording` returns `flowFile` regardless.
 7. Edit or reorder the YAML only after `flow-finish-recording`. An active remote recording can overwrite mid-recording edits.
@@ -199,10 +203,11 @@ Only these unrecorded insertions are allowed, at states observed live:
 - A planned `snapshot:` for pixel-level evidence.
 - `await: { idle: true }` after a navigation identity check.
 - The Chromium launch that packages the live boot.
+- A top-level `teardown:` list. Move recorded cleanup steps under it, or write requested cleanup there. Put backend cleanup scripts before device steps.
 
 Keep raw forms only when conversion changes behavior. Examples include point-anchored or panning pinch, an edge swipe or one with exotic velocity control, or rotation with a tested start angle, radius, pivot, duration, or speed. Keep screenshots for human evidence. Use `snapshot:` for automated visual comparison. Read [Flow YAML](flow-yaml.md) for syntax.
 
-If polish reveals a missing action or structural check, restore its preceding state and record it. Do not add remembered behavior directly to YAML.
+If polish reveals a missing action or structural check, restore its preceding state and record it. Do not add remembered behavior directly to YAML. Only the four insertions above can be written by hand, and a hand-written teardown step must pass in the replay.
 
 ## Worked example
 
@@ -261,6 +266,7 @@ Resolve every hit and confirm:
 - The e2e launch and real first-screen gate are present. Only Chromium permits an inserted launch.
 - Every screen change has a destination-only identity check and an `idle` readiness check. The two are repaired differently: record a missing identity check live on the restored screen, but add a missing readiness gate in YAML, because `await: { idle: true }` has no recorder form.
 - Every `hidden` check follows a `visible` check on the same stable selector and the removing action. A proven containing screen is not a substitute, because it is no evidence the selector itself ever resolved.
+- Cleanup that must also run after a failure is in `teardown:`, not in the last steps.
 
 ## Replay
 

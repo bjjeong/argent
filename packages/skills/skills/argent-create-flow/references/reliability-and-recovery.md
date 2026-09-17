@@ -109,7 +109,8 @@ Classify before editing:
 
 | Outcome            | Meaning                                        | Response                                                                                                                                                |
 | ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hard failure       | A step fails and later steps skip              | Inspect that step and actual state                                                                                                                      |
+| Hard failure       | A step fails; later steps skip, teardown runs  | Inspect that step and actual state                                                                                                                      |
+| Teardown failure   | A teardown step fails and its list stops       | The run fails even if every step passed. Repair that teardown step and check what the skipped teardown steps left behind                                |
 | Environment error  | The reason says the check could not run        | Repair the environment and rerun; it is no verdict about the app. A failed `launch:` is `errored` too but **is** a verdict — treat it as a hard failure |
 | Silent misfire     | The run passes but final state is wrong        | Restore the first wrong screen and record a stronger gate                                                                                               |
 | Partial divergence | An intermediate result disagrees with its echo | Find the first divergent transition                                                                                                                     |
@@ -120,7 +121,7 @@ Classify before editing:
 Then:
 
 1. Record the first failure or divergence index and message.
-2. Capture `screenshot` and `describe`. Use native or React Native discovery when needed.
+2. Capture `screenshot` and `describe`. Use native or React Native discovery when needed. After a device teardown step, the screen shows the state after the teardown, not the state at the failure. Rely on the failure reason, or reach the failing state again with direct MCP calls before you inspect it.
 3. Compare actual state with the preceding echo and expected destination.
 4. Classify the cause: selector, screen, missing element, readiness, stale data, optional interstitial, or product behavior.
 5. State the diagnosis in one sentence before correcting it.
@@ -133,7 +134,7 @@ Then:
 - For four or more broken steps, unclear state, or a comparison or profiling flow, fully re-record.
 - Treat manual recovery as diagnosis only. It never counts as a replay pass.
 
-Starting again under the same name truncates the YAML, including the top-level `env`. Save the working steps and environment defaults before you record again.
+Starting again under the same name truncates the YAML, including the top-level `env` and `teardown`. Save the working steps, environment defaults, and teardown list before you record again. Restore them after `flow-finish-recording`.
 
 ### Make every replacement gate stronger
 
