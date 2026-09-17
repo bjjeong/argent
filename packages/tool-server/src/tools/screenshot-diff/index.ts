@@ -37,12 +37,7 @@ const zodSchema = z
       .min(1)
       .optional()
       .describe("Path to the current PNG file. Required unless captureCurrent is true."),
-    udid: z
-      .string()
-      .min(1)
-      .describe(
-        "Target device id from `list-devices` (iOS UDID, Android serial, Apple TV UDID, Vega serial, or Chromium id). Required even when comparing two saved files, though no device is touched in that case."
-      ),
+    udid: z.string().min(1).describe("Target device id from `list-devices`."),
     captureBaseline: z.coerce
       .boolean()
       .optional()
@@ -117,7 +112,7 @@ export const screenshotDiffTool: ToolDefinition<Params, ScreenshotDiffResult> = 
     failedMsg: ({ failureSignal }) => `Failed to compare screenshots: ${failureSignal.error_code}`,
   },
   description: `Compare two PNG screenshots and return a compact visual-diff summary.
-Accepts saved baseline/current PNG paths, or one saved PNG plus one live full-resolution capture from a device. Comparing two saved PNGs touches no device and works on every platform; live capture (captureBaseline/captureCurrent) is iOS and Android only. Always provide udid.
+Accepts saved baseline/current PNG paths, or one saved PNG plus one live full-resolution capture from a device. Always provide udid so the capture backend can be resolved.
 Use when stable before/after screenshots exist and the expected result is pixel-visible: layout, spacing, color, typography, image/icon rendering, clipping, overflow, or text rendering.
 For live captures, set exactly one of captureBaseline or captureCurrent; use baselinePath + captureCurrent for the common visual-regression flow.
 Physical iPhones: live captures are device-wide and need no registered app. Keep baselines per device model; different aspect ratios fail as a dimension mismatch.
@@ -310,9 +305,7 @@ function validateInputSources(params: Params): void {
   // half is unavailable rather than refusing the whole tool.
   if ((params.captureBaseline || params.captureCurrent) && CAPTURE_UNSUPPORTED.has(platform)) {
     throw invalid(
-      `Cannot capture a screenshot for a diff on ${platform}. Capture it separately with the ` +
-        `\`screenshot\` tool, then pass both files as baselinePath and currentPath — comparing ` +
-        `saved images works on every platform.`,
+      `Live capture is not supported on ${platform}; capture with \`screenshot\` and pass both files as baselinePath and currentPath.`,
       "screenshot_diff_capture_unsupported"
     );
   }

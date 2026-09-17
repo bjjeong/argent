@@ -75,9 +75,7 @@ describe("screenshot-diff live capture", () => {
       await expect(
         executeScreenshotDiffTool({}, { udid, baselinePath: "/tmp/a.png", captureCurrent: true })
       ).rejects.toThrow(
-        new RegExp(
-          `Cannot capture a screenshot for a diff on ${platform}.*baselinePath and currentPath`
-        )
+        new RegExp(`Live capture is not supported on ${platform}.*baselinePath and currentPath`)
       );
     }
   );
