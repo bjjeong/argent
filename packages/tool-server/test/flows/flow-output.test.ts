@@ -1183,6 +1183,7 @@ describe("flow-output — a value a script set to null", () => {
       ok: false,
       reason:
         "{{output:user.promo}} did not resolve: `output.user.promo` is null; add a `??` fallback if the value can be null",
+      miss: true,
     });
   });
 

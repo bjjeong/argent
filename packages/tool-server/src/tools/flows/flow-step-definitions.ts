@@ -456,9 +456,37 @@ export function summarizeStep(step: FlowStep, n: number): string {
   return `${n}. ${def.summaryKind ?? step.kind}: ${def.summary(step)}`;
 }
 
-/** One human-readable line per recorded step, in the flow file's own spellings. */
+/**
+ * One human-readable line per recorded step, in the flow file's own spellings,
+ * then one per teardown step. The teardown lines come last and are numbered on
+ * their own: a caller attaches notes to the first `steps.length` lines by
+ * position, and the step count stays `steps.length`.
+ */
 export function summarizeSteps(flow: FlowFile): string[] {
-  return flow.steps.map((step, i) => summarizeStep(step, i + 1));
+  return [
+    ...flow.steps.map((step, i) => summarizeStep(step, i + 1)),
+    ...(flow.teardown ?? []).map((step, i) => `teardown ${summarizeStep(step, i + 1)}`),
+  ];
+}
+
+/**
+ * A step named inside a one-line runtime message: the way its report line
+ * names it (`tool <name>`, or the kind and its target), and for a kind whose
+ * report line shows no target, the kind and the file's own spelling. Never a
+ * `script` summary, which carries its `env` map; a script has a target.
+ * The name is cut, then its control characters are escaped, because an
+ * `echo` message or a `launch` id can hold a line break; in the other order
+ * the cut could split an escape.
+ */
+export function stepName(step: FlowStep): string {
+  if (step.kind === "tool") return escapeInline(renderedValue(`tool ${step.name}`));
+  const target = stepTarget(step);
+  const def = definitionOf(step);
+  const name =
+    target !== undefined
+      ? `${step.kind} ${target}`
+      : `${def.summaryKind ?? step.kind} ${def.summary(step)}`;
+  return escapeInline(renderedValue(name));
 }
 
 /**

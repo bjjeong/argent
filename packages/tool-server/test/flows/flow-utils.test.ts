@@ -2056,6 +2056,7 @@ describe("output references", () => {
         reason:
           "`tap.text` (spelled `tap.on.text` if the target sits under `on:`): " +
           "{{output:row}} did not resolve: `output` has no `row` (it has no keys)",
+        miss: { kind: "text" },
       });
       expect(
         resolveStepReferences(
@@ -2066,6 +2067,7 @@ describe("output references", () => {
         ok: false,
         reason:
           "`args.text`: {{output:user.promo}} did not resolve: `output.user` has no `promo` (its keys: name)",
+        miss: { kind: "arg" },
       });
     });
 

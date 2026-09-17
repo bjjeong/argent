@@ -53,9 +53,16 @@ function attachStepWarnings(
 }
 
 function warningHeadline(warnings: Map<number, RecordedStepWarning>, discarded: number): string {
-  const counts = { conversion: 0, wait: 0, env: 0 };
+  const counts = { conversion: 0, wait: 0, env: 0, failure: 0 };
   for (const { kind } of warnings.values()) counts[kind] += 1;
   const clauses: string[] = [];
+  if (counts.failure > 0) {
+    const one = counts.failure === 1;
+    clauses.push(
+      `${counts.failure} ${one ? "step" : "steps"} recorded a flow-execute call whose run ` +
+        `failed live, and ${one ? "it stops" : "they stop"} the replay there`
+    );
+  }
   if (counts.conversion > 0) {
     clauses.push(
       `${counts.conversion} ${counts.conversion === 1 ? "step carries" : "steps carry"} a ` +
@@ -126,6 +133,11 @@ function anchoredWarnings(
   return kept;
 }
 
+function teardownCount(teardown: readonly FlowStep[] | undefined): string {
+  if (!teardown || teardown.length === 0) return "";
+  return `, ${teardown.length} teardown ${teardown.length === 1 ? "step" : "steps"}`;
+}
+
 export const flowFinishRecordingTool: ToolDefinition<
   z.infer<typeof zodSchema>,
   {
@@ -152,7 +164,7 @@ export const flowFinishRecordingTool: ToolDefinition<
   },
   description: `Finish recording the flow named by \`name\` + \`project_root\`, leaving recordings under any other key untouched. Returns { message, path, executionPrerequisite, steps, summary, flowFile, savedTo } - a summary of all recorded steps plus the final YAML. Use when you have added all desired steps and want to finalize the flow file. Fails if that flow has no recording in progress.
 A warning flow-add-step raised while recording a step is repeated in \`summary\` as a \`warning:\` line of its own, right below the step it judges, and \`message\` counts them by kind. A warning is repeated only while the step it judges is still identifiable by its number: hand-editing the .yaml during the recording moves the steps, so those warnings are DROPPED rather than pinned on whichever step inherited the number, and \`message\` says how many were dropped. A step that carries a cross-tree warning was re-probed against the runner's tree: read it before converting that wait to \`await:\`/\`assert:\`, which is what the verdict is about and what this moment is for. A step that recorded a wait which did not pass was never probed at all, and its own warning names the CAUSE, because only one of them judges the condition: an unmet wait was read and found false, and it stops the run at replay; a wait whose tree source could not be read, or one that was cancelled, observed nothing and leaves the condition UNKNOWN rather than known-bad. Read those before replaying.
-For an environment warning on a recorded \`run:\` step, set the required values in the target flow's top-level \`env\`.
+For an environment warning on a recorded \`run:\` step, set the required values in the target flow's top-level \`env\`. A step whose recorded \`flow-execute\` run failed live stops the replay at that step: fix that flow or remove the step.
 You can still edit the .yaml file directly afterwards to remove or reorder steps.`,
   zodSchema,
   services: () => ({}),
@@ -194,6 +206,8 @@ You can still edit the .yaml file directly afterwards to remove or reorder steps
         // flow-step-definitions; keeping the order is what makes the next one
         // recoverable rather than fatal.
         const anchored = anchoredWarnings(session, flow.steps);
+        // By position: the teardown lines come after every step line, and
+        // `anchored` holds no number past the last step.
         const summary = attachStepWarnings(summarizeSteps(flow), anchored);
         // Everything raised, less what survived. `discardedWarnings` counts
         // what the appends threw away; `stepWarnings` what the finish still
@@ -209,7 +223,10 @@ You can still edit the .yaml file directly afterwards to remove or reorder steps
     return {
       // Name the counts in `message` as well. A caller that reads only
       // `message` would otherwise polish blind.
-      message: `Finished recording "${params.name}" flow (${flow.steps.length} steps)` + headline,
+      message:
+        `Finished recording "${params.name}" flow (${flow.steps.length} steps` +
+        `${teardownCount(flow.teardown)})` +
+        headline,
       path: filePath,
       executionPrerequisite: flow.executionPrerequisite,
       steps: flow.steps.length,

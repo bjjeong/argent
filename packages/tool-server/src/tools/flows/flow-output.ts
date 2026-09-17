@@ -383,7 +383,15 @@ type OutputFieldResolution =
       /** Set when a whole-field `tool.args` reference gave something other than a string. */
       wholeFieldType?: string;
     }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * The field stopped on a reference whose paths all missed: the document
+       * does not hold them, or holds them as `null`. Set for nothing else.
+       */
+      miss?: true;
+    };
 
 /**
  * Resolve every reference in one field, left to right, exactly once. A value a
@@ -417,6 +425,7 @@ export function resolveOutputField(
           // A key a script set to null is one it meant to leave empty, which is
           // what a fallback is for.
           (resolved.nullWithoutFallback ? "; add a `??` fallback if the value can be null" : ""),
+        miss: true,
       };
     }
     references.push({ source: part.reference.source, value: resolved.value });

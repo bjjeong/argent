@@ -55,6 +55,8 @@ export interface StepReport {
   artifacts?: Record<string, unknown>;
   scriptLog?: string;
   scriptLogTruncated?: boolean;
+  /** Set on every report of a `teardown` list, fragment teardown lists included. */
+  teardown?: boolean;
 }
 
 export interface FlowReport {
@@ -303,6 +305,41 @@ export function renderStepLine(s: StepReport, n: number, topFlow: string): strin
 }
 
 /**
+ * Whether each report, fed in order, opens a teardown section. The report is
+ * flat, so a section is found by comparing a report with the last report at
+ * its depth, or, for the first report at a depth, with the report that opened
+ * that depth: a fragment's teardown list inside a teardown list is one section,
+ * and a root teardown list after a fragment's teardown list is a second one.
+ */
+export function createTeardownSections(): (s: StepReport) => boolean {
+  // The last report at each open depth, shallowest first. A stack, so each
+  // depth is dropped once and a report of ever-deeper steps stays linear:
+  // depth is wire data.
+  const open: { depth: number; teardown: boolean }[] = [];
+  return (s) => {
+    const depth =
+      typeof s.depth === "number" && Number.isInteger(s.depth) && s.depth > 0 ? s.depth : 0;
+    while (open.length > 0 && open[open.length - 1]!.depth > depth) open.pop();
+    // What is left on top is the last report at this depth, or the one that
+    // opened it.
+    const top = open[open.length - 1];
+    const before = top?.teardown === true;
+    if (top?.depth === depth) open.pop();
+    const teardown = s.teardown === true;
+    open.push({ depth, teardown });
+    return teardown && !before;
+  };
+}
+
+/**
+ * The label above a teardown section, in the glyph and number columns of the
+ * step line that follows (numbered `n`), so the word lines up with the labels.
+ */
+export function renderTeardownLine(s: StepReport, n: number): string {
+  return `  ${"─".repeat(2 + Math.max(2, String(n).length))} ${stepIndent(s.depth)}teardown`;
+}
+
+/**
  * A line printed under a step (warning, artifact path), padded to the width of
  * renderStepLine's `  ✓ NN ` prefix — which grows past step 99 — plus the
  * step's depth indent. Shared by the buffered and live renderers.
@@ -386,12 +423,25 @@ export function renderArtifactLines(report: FlowReport): string[] {
 export function renderFailedSteps(report: FlowReport): string[] {
   const lines: string[] = [];
   let n = 0;
+  // A section's label is printed with the first of its steps that is printed,
+  // since most steps are not.
+  const opensTeardown = createTeardownSections();
+  let unlabelled: StepReport | undefined;
+  const label = (s: StepReport, at: number): void => {
+    if (s.teardown !== true || !unlabelled) return;
+    lines.push(renderTeardownLine(unlabelled, at));
+    unlabelled = undefined;
+  };
   for (const s of report.steps) {
+    if (opensTeardown(s)) unlabelled = s;
     if (s.kind === "echo") {
       // Narration has no place in a list of failures, except an echo that
       // errored: its reference did not resolve, and it is what stopped the run.
       const line = s.status === "error" ? renderEchoLine(s) : undefined;
-      if (line) lines.push(line);
+      if (line) {
+        label(s, n + 1);
+        lines.push(line);
+      }
       continue;
     }
     n++;
@@ -406,6 +456,7 @@ export function renderFailedSteps(report: FlowReport): string[] {
     ) {
       continue;
     }
+    label(s, n);
     lines.push(renderStepLine(s, n, report.flow));
     if (s.warning) lines.push(renderUnderStepLine(s, n, `⚠ ${s.warning}`));
     lines.push(...scriptLog);
@@ -803,7 +854,9 @@ export function renderReport(report: FlowReport): string {
   }
   // Number only real steps so echo narration doesn't leave gaps in the sequence.
   let n = 0;
+  const opensTeardown = createTeardownSections();
   for (const s of report.steps) {
+    if (opensTeardown(s)) lines.push(renderTeardownLine(s, n + 1));
     if (s.kind === "echo") {
       const line = renderEchoLine(s);
       if (line) lines.push(line);
@@ -1513,6 +1566,7 @@ export async function flow(argv: string[], options: FlowCommandOptions): Promise
   // below owns the whole report.
   let liveSteps = 0;
   let liveIndex = 0;
+  const opensTeardown = createTeardownSections();
   const onStepReport = (event: unknown): void => {
     const s = event as StepReport;
     if (args.jsonStream) {
@@ -1521,6 +1575,7 @@ export async function flow(argv: string[], options: FlowCommandOptions): Promise
     }
     if (liveSteps === 0) console.log(`Flow "${flowName}"`);
     liveSteps++;
+    if (opensTeardown(s)) console.log(renderTeardownLine(s, liveIndex + 1));
     if (s.kind === "echo") {
       const line = renderEchoLine(s);
       if (line) console.log(line);

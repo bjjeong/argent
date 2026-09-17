@@ -31,6 +31,7 @@ import {
   parseFlow,
   precedesLeadingLaunch,
   runTargetName,
+  stepsAndTeardown,
   type BlockStep,
   type FlowFile,
   type FlowStep,
@@ -41,15 +42,16 @@ import {
 import { createScriptLogBudget, type FlowScriptLogBudget } from "./script/flow-script-executor";
 import {
   assertNoEnvOutputReferences,
+  escapeInline,
   renderedValue,
   resolveStepReferences,
   type StepReferenceResolution,
   type WholeFieldReference,
 } from "./flow-utils";
-import type { ResolvedOutputReference } from "./flow-output";
+import type { OutputFieldKind, ResolvedOutputReference } from "./flow-output";
 import { canonicalFlowPath, resolveFlowRelativeFile } from "./flow-file-refs";
 import { mergeScriptOutput, runFlowScriptStep } from "./flow-script-step";
-import { describeWhenCondition, stepTarget } from "./flow-step-definitions";
+import { describeWhenCondition, stepName, stepTarget } from "./flow-step-definitions";
 import {
   describeScriptEnvProblem,
   mergeScriptEnv,
@@ -59,6 +61,7 @@ import {
 import { createScriptRunNotes, type FlowScriptRunNotes } from "./script/flow-script-executor";
 import { sleepOrAbort } from "../../utils/timing";
 import { InvalidToolInputError } from "../../utils/capability";
+import { resolveSecretPlaceholders } from "../../utils/secrets";
 import { invokeSubTool, describeNestedParamError } from "../../utils/sub-invoke";
 import { iosDeviceRunnerRef } from "../../blueprints/ios-device-runner";
 import { isUnmetUiWaitResult } from "../await-ui-element";
@@ -227,6 +230,13 @@ export interface StepReport {
    * so renderers cannot reconstruct depth downstream.
    */
   depth?: number;
+  /**
+   * Set on every report of a `teardown` list: its steps, the `run:` and `when`
+   * markers in it with everything they expand to, their skip reports, and a
+   * fragment's teardown list inside the parent's steps. A renderer marks the
+   * section with it, and a harness tells a cleanup failure from a step failure.
+   */
+  teardown?: true;
 }
 
 export interface FlowRunResult {
@@ -467,13 +477,17 @@ async function treeSourceGate(
   return null;
 }
 
-async function runLaunch(state: ExecState, app: Launch): Promise<DirectiveOutcome> {
+async function runLaunch(
+  state: ExecState,
+  app: Launch,
+  teardown: boolean
+): Promise<DirectiveOutcome> {
   const env = deviceEnv(state);
   const { registry, device, signal } = env;
 
   if (state.treeOutage) state.treeOutage.proven = undefined;
 
-  if (device.platform === "chromium") return runChromiumLaunch(state, app);
+  if (device.platform === "chromium") return runChromiumLaunch(state, app, teardown);
 
   const bundleId = appIdForPlatform(app, device.platform);
   if (!bundleId) {
@@ -513,11 +527,21 @@ async function runLaunch(state: ExecState, app: Launch): Promise<DirectiveOutcom
  * only the run's FIRST launch can be satisfied without booting — settling the
  * boot {@link resolveRunDevice} hoisted, or attaching to an instance the runner
  * does not own. Later launches boot their own ({@link bootChromiumForLaunch}).
+ *
+ * A teardown launch always boots, and leaves the first launch to the steps.
+ * Whether the steps reached their leading launch depends on where they
+ * stopped, and a cleanup step that settles for the hoisted instance or attaches
+ * to a pinned one would act on a different app after an early failure than
+ * after a pass.
  */
-async function runChromiumLaunch(state: ExecState, app: Launch): Promise<DirectiveOutcome> {
+async function runChromiumLaunch(
+  state: ExecState,
+  app: Launch,
+  teardown: boolean
+): Promise<DirectiveOutcome> {
   const { registry, device, signal } = deviceEnv(state);
 
-  if (state.chromiumLaunched) return bootChromiumForLaunch(state, app);
+  if (state.chromiumLaunched || teardown) return bootChromiumForLaunch(state, app);
   state.chromiumLaunched = true;
 
   const spec = chromiumLaunchSpec(app);
@@ -766,13 +790,23 @@ function displayFlowName(params: { name?: string; flow_path?: string }): string 
   return params.name || stem || params.flow_path || "(unspecified)";
 }
 
-function* walkSteps(steps: FlowStep[], within = ""): Generator<{ step: FlowStep; where: string }> {
+function* walkSteps(
+  steps: FlowStep[],
+  within = "",
+  label = "step"
+): Generator<{ step: FlowStep; where: string }> {
   for (const [i, step] of steps.entries()) {
-    const where = `step ${i + 1}${within}`;
+    const where = `${label} ${i + 1}${within}`;
     yield { step, where };
     const inner = blockSteps(step);
-    if (inner) yield* walkSteps(inner, ` of the ${step.kind}: block at ${where}`);
+    if (inner) yield* walkSteps(inner, ` of the ${step.kind}: block at ${where}`, label);
   }
+}
+
+/** Every step of a flow file, the teardown list's after the steps. */
+function* walkFlow(flow: FlowFile): Generator<{ step: FlowStep; where: string }> {
+  yield* walkSteps(flow.steps);
+  if (flow.teardown) yield* walkSteps(flow.teardown, "", "teardown step");
 }
 
 interface RetiredArgUse {
@@ -849,8 +883,8 @@ function* nestedInvocations(
   }
 }
 
-function findRetiredToolArg(registry: Registry, steps: FlowStep[]): RetiredArgUse | undefined {
-  for (const { step, where } of walkSteps(steps)) {
+function findRetiredToolArg(registry: Registry, flow: FlowFile): RetiredArgUse | undefined {
+  for (const { step, where } of walkFlow(flow)) {
     if (step.kind !== "tool") continue;
     const props = toolArgProps(registry, step.name);
     if (!props) continue;
@@ -886,7 +920,7 @@ function retiredArgReason(use: RetiredArgUse): string {
  * updateBaselines writes PNGs no later run can find.
  */
 function assertUploadSelfContained(flow: FlowFile): void {
-  for (const { step } of walkSteps(flow.steps)) {
+  for (const { step } of walkFlow(flow)) {
     if (step.kind === "run") {
       throw new FailureError(
         `This flow uses run: composition ("run: ${step.flow}"), which requires a co-located ` +
@@ -947,7 +981,7 @@ export function createRunFlowTool(
 asked to replay a recorded path, re-run a QA regression, or check that a known journey still passes; for a
 one-off interaction use the gesture tools instead, and to author a flow use flow-start-recording. Pass
 exactly one flow source: name (under project_root) or flow_path.
-Returns a per-step report: the first failure stops the run and the rest report as skipped.`,
+Returns a per-step report: the first failure stops the run and the rest report as skipped, but the flow's teardown list still runs unless the run was cancelled.`,
     longRunning: true,
     zodSchema,
     fileInputs,
@@ -986,7 +1020,7 @@ Returns a per-step report: the first failure stops the run and the rest report a
       const flowsDir = path.dirname(canonicalPath);
       const flow = parseFlow(await fs.readFile(canonicalPath, "utf8"));
       if (viaUpload) assertUploadSelfContained(flow);
-      const retiredArg = findRetiredToolArg(registry, flow.steps);
+      const retiredArg = findRetiredToolArg(registry, flow);
       if (retiredArg) {
         throw new FailureError(`Flow "${flowName}" ${retiredArgReason(retiredArg)}`, {
           error_code: FAILURE_CODES.FLOW_FILE_INVALID,
@@ -996,6 +1030,25 @@ Returns a per-step report: the first failure stops the run and the rest report a
         });
       }
       const rootEntry: RunStackEntry = { canonical: canonicalPath, display: flowName };
+      const rootScope: StepScope = { runStack: [rootEntry], depth: 0, env: flow.env ?? {} };
+      const secretCheck: TeardownSecretCheck = {
+        projectRoot: params.project_root,
+        runtimeEnv: params.env ?? {},
+      };
+
+      // Here, before the prerequisite notice and before anything that boots or
+      // pins: a refusal after `resolveRunDevice` would leave its effects in
+      // place, since only the `finally` below undoes them.
+      const secretProblem = await teardownSecretProblem(secretCheck, flow.teardown, rootScope);
+      if (secretProblem) {
+        throw new InvalidToolInputError(
+          `Flow "${flowName}" was not run: ${teardownSecretRefusal(secretProblem)}`,
+          {
+            error_code: FAILURE_CODES.SECRET_PLACEHOLDER_UNKNOWN,
+            failure_stage: "flow_run_teardown_secrets",
+          }
+        );
+      }
 
       if (flow.executionPrerequisite && !pinnedToChromium(params.device)) {
         const leading = await leadingLaunch(flow, [rootEntry]);
@@ -1079,15 +1132,21 @@ Returns a per-step report: the first failure stops the run and the rest report a
 
       let aborted: boolean;
       try {
-        await execSteps(state, flow.steps, {
-          runStack: [rootEntry],
-          depth: 0,
-          env: flow.env ?? {},
-        });
+        // The teardown list runs inside this `try`, so a device teardown step
+        // still has the status bar and the chromium instances the `finally`
+        // below takes away. In a `finally` of its own, because a throw out of
+        // the steps is a flow error, not a cancel: the teardown still runs,
+        // and the throw leaves after it.
+        try {
+          await execSteps(state, flow.steps, rootScope);
+        } finally {
+          await execTeardown(state, flow.teardown, rootScope);
+        }
       } finally {
-        // Sample the cancel flag before teardown: a client disconnect during
-        // status-bar restore / chromium teardown lands after every step
-        // already ran, and must not flip a finished run to FAIL.
+        // Sampled after the teardown list, so a cancel during that list fails
+        // the run as a cancel during the steps does. A client disconnect during
+        // the status-bar restore or the chromium shutdown below lands after
+        // every step ran, and must not flip a finished run to FAIL.
         aborted = state.signal?.aborted === true;
         if (state.pinned && device) await restoreStatusBar(device);
         for (let i = state.owned.length - 1; i >= 0; i--) {
@@ -1127,8 +1186,9 @@ async function resolveRunDevice(
       }
       return { device: resolveDevice(booted.deviceId), booted };
     }
-    if (!flowRequiresDevice(registry, flow.steps)) {
-      if (!flowScopesDevice(registry, flow.steps)) return { device: null, booted: null };
+    if (!flowRequiresDevice(registry, stepsAndTeardown(flow))) {
+      if (!flowScopesDevice(registry, stepsAndTeardown(flow)))
+        return { device: null, booted: null };
       // A flow that only SCOPES to a device (a cleanup flow) takes one when one
       // is unambiguous, so the teardown stays narrowed to the run device and
       // cannot reap what another agent is mid-session on. When resolution has
@@ -1341,6 +1401,11 @@ interface StepScope {
   runStack: RunStackEntry[];
   depth: number;
   env: Readonly<ScriptEnv>;
+  /**
+   * Set for a teardown list and everything it starts. {@link childScope} copies
+   * it, so a fragment or a `when` block inside a teardown list is teardown too.
+   */
+  teardown?: true;
 }
 
 function scopeFlow(scope: StepScope): string {
@@ -1374,28 +1439,110 @@ function childScope(
 }
 
 /**
- * The depth stamp for a report — omitted at top level, so a flow with no
- * nesting steps produces a report byte-identical to the pre-depth shape.
+ * The scope stamp for a report: its depth, omitted at top level so a flow with
+ * no nesting steps produces a report byte-identical to the pre-depth shape, and
+ * the teardown label, omitted outside a teardown list for the same reason.
  */
-function depthOf(scope: StepScope): Pick<StepReport, "depth"> {
-  return scope.depth ? { depth: scope.depth } : {};
+function scopeStamp(scope: StepScope): Pick<StepReport, "depth" | "teardown"> {
+  return {
+    ...(scope.depth ? { depth: scope.depth } : {}),
+    ...(scope.teardown ? { teardown: true } : {}),
+  };
+}
+
+/** The report fields that name a step whose report line shows no target. */
+function stepSubject(step: FlowStep): Pick<StepReport, "tool" | "message"> {
+  if (step.kind === "echo") return { message: step.message };
+  if (step.kind === "tool") return { tool: step.name };
+  return {};
+}
+
+/** {@link stepName}, with the fragment the step belongs to when that is not the root flow. */
+function stepNameInScope(step: FlowStep, scope: StepScope): string {
+  const flow = stepFlow(step, scope);
+  const root = scope.runStack[0]!.display;
+  return flow === root ? stepName(step) : `${stepName(step)} [${escapeInline(flow)}]`;
+}
+
+const LISTED_TEARDOWN_STEPS = 10;
+
+interface TeardownStop {
+  reason: string;
+  /** For the first skipped step that is not an `echo`; none when only echoes are left. */
+  warning?: string;
+  warned: boolean;
+}
+
+/**
+ * What a teardown list that stopped at `steps[at - 1]` says about the steps it
+ * did not start. Named from the `FlowStep`, not from the reports: a report
+ * carries no step, and the last failed report can belong to another list (a
+ * fragment's teardown list that failed after its steps stopped).
+ *
+ * The warning goes on a skipped step rather than on the step that failed,
+ * because only this gate knows the rest of the list, and on a step that is not
+ * an `echo`, because the CLI prints an echo's message and reason only.
+ */
+function teardownStop(steps: FlowStep[], at: number, scope: StepScope): TeardownStop {
+  const stopper = stepNameInScope(steps[at - 1]!, scope);
+  const reason = `did not start: the teardown list stopped at ${stopper}`;
+  const left = steps
+    .slice(at)
+    .filter((step) => step.kind !== "echo")
+    .map((step) => stepNameInScope(step, scope));
+  if (left.length === 0) return { reason, warned: false };
+  if (left.length === 1) {
+    return {
+      reason,
+      warning:
+        `this teardown step did not start because the teardown list stopped at ${stopper}. ` +
+        "What it cleans up can remain",
+      warned: false,
+    };
+  }
+  const more = left.length - 1;
+  const listed = left.slice(0, LISTED_TEARDOWN_STEPS).join(", ");
+  const unlisted =
+    left.length > LISTED_TEARDOWN_STEPS ? `, and ${left.length - LISTED_TEARDOWN_STEPS} more` : "";
+  return {
+    reason,
+    warning:
+      `this and ${more} more teardown step${more === 1 ? "" : "s"} did not start because the ` +
+      `teardown list stopped at ${stopper}: ${listed}${unlisted}. What they clean up can remain`,
+    warned: false,
+  };
 }
 
 async function execSteps(state: ExecState, steps: FlowStep[], scope: StepScope): Promise<void> {
-  for (const step of steps) {
+  let teardownStopped: TeardownStop | undefined;
+  for (const [i, step] of steps.entries()) {
     const index = state.reports.length;
 
     if (state.stopped) {
-      const stopReason = state.signal?.aborted ? "run aborted" : undefined;
+      // A skipped teardown step can leave backend data behind, so outside a
+      // cancel each list a teardown runs says what it did not start. A list
+      // starts only while the run is not stopped, so the step before the first
+      // skip is the one that stopped it.
+      const aborted = state.signal?.aborted === true;
+      if (!aborted && scope.teardown && i > 0) {
+        teardownStopped ??= teardownStop(steps, i, scope);
+      }
+      const stopReason = aborted ? "run aborted" : teardownStopped?.reason;
+      let warning: string | undefined;
+      if (!aborted && teardownStopped && !teardownStopped.warned && step.kind !== "echo") {
+        warning = teardownStopped.warning;
+        teardownStopped.warned = true;
+      }
       pushReport(state, {
         index,
         kind: step.kind,
         status: "skip",
         flow: stepFlow(step, scope),
         target: stepTarget(step),
-        ...depthOf(scope),
+        ...scopeStamp(scope),
         ...(stopReason ? { reason: stopReason } : {}),
-        ...(step.kind === "echo" ? { message: step.message } : {}),
+        ...(warning ? { warning } : {}),
+        ...stepSubject(step),
       });
       const inner = blockSteps(step);
       if (inner) reportBlockSkipped(state, inner, childScope(scope), stopReason);
@@ -1409,7 +1556,7 @@ async function execSteps(state: ExecState, steps: FlowStep[], scope: StepScope):
         status: "error",
         flow: scopeFlow(scope),
         target: stepTarget(step),
-        ...depthOf(scope),
+        ...scopeStamp(scope),
         reason: `step needs a device but the flow was resolved as device-free — pass an explicit device`,
       });
       const inner = blockSteps(step);
@@ -1425,8 +1572,8 @@ async function execSteps(state: ExecState, steps: FlowStep[], scope: StepScope):
         reason: "run aborted",
         flow: stepFlow(step, scope),
         target: stepTarget(step),
-        ...depthOf(scope),
-        ...(step.kind === "echo" ? { message: step.message } : {}),
+        ...scopeStamp(scope),
+        ...stepSubject(step),
       });
       const inner = blockSteps(step);
       if (inner) reportBlockSkipped(state, inner, childScope(scope), "run aborted");
@@ -1462,12 +1609,38 @@ function reportBlockSkipped(
       reason,
       flow: stepFlow(step, scope),
       target: stepTarget(step),
-      ...depthOf(scope),
-      ...(step.kind === "echo" ? { message: step.message } : {}),
+      ...scopeStamp(scope),
+      ...stepSubject(step),
     });
     const inner = blockSteps(step);
     if (inner) reportBlockSkipped(state, inner, childScope(scope), reason);
   }
+}
+
+/**
+ * Run a flow's `teardown` list after its steps, under a stop scope of its own:
+ * the steps' stop flag is saved and cleared, so the list runs after a failure,
+ * and on return it is the saved flag OR what the list set. That OR is what makes
+ * a failed fragment teardown stop the parent's remaining steps, while the
+ * parent's own teardown list still runs.
+ *
+ * After a cancel the flag is not cleared, and the list still goes through
+ * {@link execSteps}: its gates report every teardown step skipped with "run
+ * aborted", so the report stays complete and no teardown step starts. There is
+ * one signal for the steps and the teardown alike. A second one would split the
+ * readers: device and `tool:` steps read `ctx`, script steps and the run's
+ * `aborted` sample read `state.signal`.
+ */
+async function execTeardown(
+  state: ExecState,
+  steps: FlowStep[] | undefined,
+  scope: StepScope
+): Promise<void> {
+  if (!steps || steps.length === 0) return;
+  const stopped = state.stopped;
+  if (!state.signal?.aborted) state.stopped = false;
+  await execSteps(state, steps, { ...scope, teardown: true });
+  state.stopped = stopped || state.stopped;
 }
 
 /**
@@ -1502,7 +1675,7 @@ async function execWhenStep(
     kind: "when",
     flow: scopeFlow(scope),
     target,
-    ...depthOf(scope),
+    ...scopeStamp(scope),
   } as const;
   const inner = childScope(scope);
 
@@ -1518,10 +1691,11 @@ async function execWhenStep(
     // saying nothing, is what the when-guard fields are on the list to prevent.
     const guard = resolveStepReferences(step, state.output);
     if (!guard.ok) {
+      const hint = guard.miss && scope.teardown ? teardownMissHint(state, scope, "guard") : "";
       pushReport(state, {
         ...marker,
         status: "error",
-        reason: `could not resolve when guard (${label}): ${guard.reason}`,
+        reason: `could not resolve when guard (${label}): ${guard.reason}${hint}`,
       });
       state.stopped = true;
       reportBlockSkipped(state, step.steps, inner, "when guard errored");
@@ -1614,7 +1788,7 @@ async function execRunStep(
       flow: display,
       target,
       reason,
-      ...depthOf(scope),
+      ...scopeStamp(scope),
     });
     state.stopped = true;
   };
@@ -1663,8 +1837,23 @@ async function execRunStep(
     return fail(`could not load fragment "${target}": ${errMsg(err)}`);
   }
 
-  const retiredArg = findRetiredToolArg(state.registry, fragment.steps);
+  const retiredArg = findRetiredToolArg(state.registry, fragment);
   if (retiredArg) return fail(`fragment "${target}" ${retiredArgReason(retiredArg)}`);
+
+  // One scope for the fragment's steps and its teardown list. With the
+  // parent's, a teardown script would resolve beside the parent's file, miss the
+  // fragment's `env` defaults, and escape the cycle check.
+  const fragmentScope = childScope(scope, {
+    runStack: [...scope.runStack, { canonical, display }],
+    ...(fragment.env ? { env: mergeScriptEnv(scope.env, fragment.env) } : {}),
+  });
+
+  const secretProblem = await teardownSecretProblem(state, fragment.teardown, fragmentScope);
+  if (secretProblem) {
+    return fail(
+      `fragment "${target}" was not run: ${escapeInline(teardownSecretRefusal(secretProblem))}`
+    );
+  }
 
   pushReport(state, {
     index,
@@ -1672,15 +1861,205 @@ async function execRunStep(
     status: "pass",
     flow: display,
     target,
-    ...depthOf(scope),
+    ...scopeStamp(scope),
   });
-  await execSteps(
-    state,
-    fragment.steps,
-    childScope(scope, {
-      runStack: [...scope.runStack, { canonical, display }],
-      ...(fragment.env ? { env: mergeScriptEnv(scope.env, fragment.env) } : {}),
-    })
+  try {
+    await execSteps(state, fragment.steps, fragmentScope);
+  } finally {
+    const position = chromiumPosition(state);
+    await execTeardown(state, fragment.teardown, fragmentScope);
+    await restoreChromiumPosition(state, position);
+  }
+}
+
+/**
+ * Where a chromium run stands before a fragment's teardown list: the instance
+ * it is on, and that instance's app path when the run booted it.
+ */
+interface ChromiumPosition {
+  deviceId: string;
+  ownedAppPath?: string;
+}
+
+function chromiumPosition(state: ExecState): ChromiumPosition | undefined {
+  if (state.device?.platform !== "chromium") return undefined;
+  const owned = ownedInstance(state);
+  return { deviceId: state.device.id, ...(owned ? { ownedAppPath: owned.appPath } : {}) };
+}
+
+/**
+ * Put the run back on the chromium instance it was on before a fragment's
+ * teardown list. A teardown `launch` always boots and moves the run
+ * ({@link bootChromiumForLaunch}), and the parent's next steps, its first
+ * `launch` above all ({@link ownedInstance}), find their instance through the
+ * run's device.
+ *
+ * An instance the run did not boot is never stopped by a boot, so its id is
+ * still good. One the run booted may have been replaced by a relaunch of the
+ * same app inside the teardown list, and a boot keeps at most one owned
+ * instance per app path, so the app path finds the current one. When there is
+ * none (that relaunch failed to boot), the run stays where the list left it.
+ */
+async function restoreChromiumPosition(
+  state: ExecState,
+  before: ChromiumPosition | undefined
+): Promise<void> {
+  if (!before || state.device?.id === before.deviceId) return;
+  const back =
+    before.ownedAppPath === undefined
+      ? before.deviceId
+      : state.owned.find((o) => o.appPath === before.ownedAppPath)?.deviceId;
+  if (back === undefined || back === state.device?.id) return;
+  state.device = resolveDevice(back);
+  // As a boot does: without it, the parent's next gesture can land on a window
+  // behind the one the teardown booted.
+  await frontChromiumPage(state.registry, state.device);
+}
+
+type TeardownSecretCheck = Pick<ExecState, "projectRoot" | "runtimeEnv">;
+
+const KEYBOARD_TOOL = "keyboard";
+const PASTE_TOOL = "paste";
+const RUN_SEQUENCE_TOOL = "run-sequence";
+const FLOW_EXECUTE_TOOL = "flow-execute";
+
+/**
+ * Resolve every `{{secret:NAME}}` a teardown list will need, and discard the
+ * values. A placeholder resolves when its step starts, which for a teardown is
+ * after the steps made the data it exists to remove: a secret set only in CI
+ * would make every local run seed and then fail its cleanup.
+ *
+ * Only the fields a secret resolver reads, each with that resolver's own
+ * sources, so the answer here is the answer the step would get. `when` blocks
+ * are not walked: a guard that is not met never resolves its block, and the
+ * platform is unknown before the device is, so a check there would refuse runs
+ * that pass. `run:` targets are read and walked, steps and teardown alike, with
+ * the guards {@link scanLeadingLaunch} uses; a target the walk cannot enter is
+ * reported by its `run:` step when that step starts.
+ *
+ * Returns what failed and where, or undefined.
+ */
+async function teardownSecretProblem(
+  check: TeardownSecretCheck,
+  teardown: FlowStep[] | undefined,
+  scope: StepScope
+): Promise<string | undefined> {
+  return secretProblemIn(check, teardown ?? [], scope, "teardown step", "");
+}
+
+async function secretProblemIn(
+  check: TeardownSecretCheck,
+  steps: FlowStep[],
+  scope: StepScope,
+  label: string,
+  within: string
+): Promise<string | undefined> {
+  for (const [i, step] of steps.entries()) {
+    const where = `${label} ${i + 1}${within}`;
+    if (step.kind === "run") {
+      const problem = await runTargetSecretProblem(check, step, scope, where);
+      if (problem) return problem;
+      continue;
+    }
+    try {
+      assertStepSecretsResolve(check, step, scope);
+    } catch (err) {
+      return `${where} (${stepName(step)}): ${errMsg(err)}`;
+    }
+  }
+  return undefined;
+}
+
+function assertStepSecretsResolve(
+  check: TeardownSecretCheck,
+  step: FlowStep,
+  scope: StepScope
+): void {
+  switch (step.kind) {
+    case "script":
+      // The whole environment the step is given, as `runScriptStep` merges it:
+      // a placeholder in the flow's own `env:` fails the step as well, and one
+      // that a step `env` or the run's `env` replaces never resolves.
+      resolveScriptEnvSecrets(mergeScriptEnv(scope.env, check.runtimeEnv, step.env), {
+        cwd: check.projectRoot,
+      });
+      return;
+    case "type":
+      // A `type` step types through `keyboard`, which resolves from the tool
+      // server's working directory, not from the project.
+      resolveSecretPlaceholders(step.text);
+      return;
+    case "tool":
+      assertToolSecretsResolve(step.name, step.args);
+      return;
+    default:
+      return;
+  }
+}
+
+function assertToolSecretsResolve(tool: string, args: Record<string, unknown>): void {
+  if (tool === KEYBOARD_TOOL || tool === PASTE_TOOL) {
+    if (typeof args.text === "string") resolveSecretPlaceholders(args.text);
+    return;
+  }
+  if (tool === RUN_SEQUENCE_TOOL && Array.isArray(args.steps)) {
+    for (const entry of args.steps as unknown[]) {
+      const call = entry as { tool?: unknown; args?: { text?: unknown } } | null;
+      if (call?.tool !== KEYBOARD_TOOL && call?.tool !== PASTE_TOOL) continue;
+      if (typeof call.args?.text === "string") resolveSecretPlaceholders(call.args.text);
+    }
+    return;
+  }
+  if (tool === FLOW_EXECUTE_TOOL) {
+    // The child run checks its own `env` against its own project root before
+    // it starts; the flow file it names is not read here.
+    const env = args.env;
+    if (typeof args.project_root !== "string") return;
+    if (env === null || typeof env !== "object" || Array.isArray(env)) return;
+    const strings = Object.fromEntries(
+      Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+    resolveScriptEnvSecrets(strings, { cwd: args.project_root });
+  }
+}
+
+async function runTargetSecretProblem(
+  check: TeardownSecretCheck,
+  step: Extract<FlowStep, { kind: "run" }>,
+  scope: StepScope,
+  where: string
+): Promise<string | undefined> {
+  let canonical: string;
+  let fragment: FlowFile;
+  try {
+    const hop = await resolveFlowRelativeFile(
+      scopeFlowDir(scope),
+      step.flow,
+      FLOW_FILE_NAME_PATTERN
+    );
+    canonical = hop.canonical;
+    if (scope.runStack.some((entry) => entry.canonical === canonical)) return undefined;
+    if (scope.runStack.length >= MAX_RUN_DEPTH) return undefined;
+    if (hop.spelling.state === "case_folded") return undefined;
+    fragment = parseFlow(await fs.readFile(canonical, "utf8"));
+  } catch {
+    return undefined;
+  }
+  const inner = childScope(scope, {
+    runStack: [...scope.runStack, { canonical, display: runDisplayName(step.flow, scope) }],
+    ...(fragment.env ? { env: mergeScriptEnv(scope.env, fragment.env) } : {}),
+  });
+  const within = ` of ${escapeInline(step.flow)} at ${where}`;
+  return (
+    (await secretProblemIn(check, fragment.steps, inner, "step", within)) ??
+    (await secretProblemIn(check, fragment.teardown ?? [], inner, "teardown step", within))
+  );
+}
+
+function teardownSecretRefusal(problem: string): string {
+  return (
+    "Argent resolves the secrets of a teardown list before the run starts, so that the run " +
+    `does not create backend data that its teardown cannot remove, and ${problem}`
   );
 }
 
@@ -1759,7 +2138,7 @@ async function runScriptStep(
 
 type LeafStep = Exclude<FlowStep, BlockStep | { kind: "run" }>;
 
-type LeafReportBase = Pick<StepReport, "index" | "kind" | "flow" | "target" | "depth">;
+type LeafReportBase = Pick<StepReport, "index" | "kind" | "flow" | "target" | "depth" | "teardown">;
 
 async function resolveAndExecLeafStep(
   state: ExecState,
@@ -1772,24 +2151,87 @@ async function resolveAndExecLeafStep(
     kind: step.kind,
     flow: scopeFlow(scope),
     target: stepTarget(step),
-    ...depthOf(scope),
+    ...scopeStamp(scope),
   };
   // Directly before the step, and only once it is reached: a skipped step reads
   // nothing, and every script above it has already merged.
   const resolution = resolveStepReferences(step, state.output);
   if (!resolution.ok) {
+    const hint =
+      resolution.miss && scope.teardown ? teardownMissHint(state, scope, resolution.miss.kind) : "";
     return {
       ...base,
       status: "error",
-      reason: resolution.reason,
-      ...(step.kind === "echo" ? { message: step.message } : {}),
-      ...(step.kind === "tool" ? { tool: step.name } : {}),
+      reason: `${resolution.reason}${hint}`,
+      ...stepSubject(step),
     };
   }
   const report = await execLeafStep(state, step, resolution, base, scope);
   if (report.status !== "fail" && report.status !== "error") return report;
   const reason = appendResolvedValues(report.reason, resolution.references);
   return reason === report.reason ? report : { ...report, reason };
+}
+
+/**
+ * Why a teardown step can miss a value: usually no step wrote it, because the
+ * script that would have written it failed, or sat in a `when` block that did
+ * not run.
+ * Said only when a report before this step did not pass. With every earlier
+ * step passing, the missing value is a mistake in the flow or the script, and
+ * advice about an optional value would hide it.
+ *
+ * The advice follows where the reference is, not the field kind: a `when`
+ * guard's fields have the same kinds as a selector's, and only a guard can turn
+ * a fallback into a skipped block.
+ */
+function teardownMissHint(
+  state: ExecState,
+  scope: StepScope,
+  where: "guard" | Exclude<OutputFieldKind, "static">
+): string {
+  const earlier = state.reports.find((report) => report.status !== "pass");
+  if (!earlier) return "";
+  const cause =
+    `. A step before this step did not pass (${reportName(earlier, scope)}: ${earlier.status}), ` +
+    "so it is possible that no step wrote the value";
+  switch (where) {
+    case "guard":
+      return (
+        `${cause}. To skip this block when the value is missing, end the reference with a ` +
+        "fallback that no screen shows, such as `?? '__none__'`: the guard is then not met, " +
+        "and the teardown list continues"
+      );
+    case "env":
+    case "arg":
+    case "echo":
+      return (
+        `${cause}. If this teardown step must run without the value, add a \`??\` fallback, ` +
+        "and make sure that the step can use an empty value"
+      );
+    case "text":
+    case "identifier":
+    case "role":
+    case "expected":
+    case "typed":
+      return (
+        `${cause}. A fallback cannot make this step optional, because the step refuses an ` +
+        "empty value. Put the step in a `when` block whose guard ends the reference with a " +
+        "fallback that no screen shows (`?? '__none__'`), or do this cleanup in a script"
+      );
+    default: {
+      const unclassified: never = where;
+      void unclassified;
+      return cause;
+    }
+  }
+}
+
+/** A report named as its report line names it, with its fragment when that is not the root flow. */
+function reportName(report: StepReport, scope: StepScope): string {
+  const subject = report.tool ?? report.target ?? report.message;
+  const name = escapeInline(renderedValue(subject ? `${report.kind} ${subject}` : report.kind));
+  const root = scope.runStack[0]!.display;
+  return report.flow && report.flow !== root ? `${name} [${escapeInline(report.flow)}]` : name;
 }
 
 /**
@@ -1879,7 +2321,7 @@ async function execLeafStep(
       return { ...base, status: "pass", message: step.message };
 
     case "launch": {
-      const r = await runLaunch(state, step.app);
+      const r = await runLaunch(state, step.app, scope.teardown === true);
       if (r.aborted) return { ...base, status: "skip", reason: r.reason };
       return { ...base, status: r.ok ? "pass" : "error", reason: r.reason };
     }
@@ -1919,6 +2361,18 @@ async function execLeafStep(
     }
 
     case "snapshot": {
+      // The parser refuses a snapshot in a teardown list; this is one that a
+      // teardown `run:` reached in a fragment's steps.
+      if (scope.teardown) {
+        return {
+          ...base,
+          status: "error",
+          reason:
+            "a snapshot step cannot run in teardown: the teardown also runs after a failed run, " +
+            "and with --update-baselines a snapshot would save the screen that run left as the " +
+            "baseline",
+        };
+      }
       try {
         const r = await runSnapshot(deviceEnv(state), {
           flowsDir: state.flowsDir,

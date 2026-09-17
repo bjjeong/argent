@@ -16,6 +16,7 @@ import {
   assertStepOutputReferences,
   blockSteps,
   holdsOutputReference,
+  stepsAndTeardown,
   refusesOutputReferences,
   resolveStepReferences,
   appIdForPlatform,
@@ -42,6 +43,7 @@ import {
 import { probeWhenCondition, type DirectiveOutcome } from "./flow-actions";
 import { stepAnchor, summarizeStep } from "./flow-step-definitions";
 import { invokeSubTool, describeNestedParamError } from "../../utils/sub-invoke";
+import { nestedOrchestratorOutcome } from "./flow-nested-outcome";
 import { isNativeDevtoolsBlockResult } from "../../blueprints/native-devtools";
 import { resolveDevice } from "../../utils/device-info";
 import { settleWithin } from "../../utils/timing";
@@ -1167,7 +1169,7 @@ async function captureRunTarget(
         : []),
       // The live call was a run of its own, with a document of its own; the
       // recorded `run:` shares the flow's. Nothing here can make the two match.
-      ...(usesOutput(fragment.steps)
+      ...(usesOutput(stepsAndTeardown(fragment))
         ? [
             `the live flow-execute ran ${name}.yaml as a run of its own, which started with an ` +
               `empty output document, and argent kept none of the output its scripts wrote; ` +
@@ -1199,6 +1201,27 @@ function runEnvWarning(
   warning: string | undefined
 ): Omit<RecordedStepWarning, "step"> | undefined {
   return step.kind === "run" && warning !== undefined ? { warning, kind: "env" } : undefined;
+}
+
+/**
+ * The warning for a `flow-execute` call whose run failed live. The step is
+ * recorded anyway: the flow it ran acted on the device, and a recording that
+ * left it out would no longer match the screen. But at replay the same failure
+ * stops the whole run at this step, and a failed fragment teardown (a wrong
+ * script path, say) leaves nothing on screen to show it.
+ *
+ * Only a failed run: a prerequisite notice started no step, and a cancel is
+ * not a verdict.
+ */
+function liveRunFailureWarning(command: string, result: unknown): string | undefined {
+  if (command !== RUN_TARGET_COMMAND) return undefined;
+  const outcome = nestedOrchestratorOutcome(command, result);
+  if (outcome?.status !== "fail") return undefined;
+  return (
+    `the live flow-execute run did not pass (${outcome.reason}). The step is recorded, but at ` +
+    "replay the same failure stops the flow at this step and skips every step after it. Fix " +
+    "the flow it runs, or remove this step, before you rely on the recording"
+  );
 }
 
 async function inheritedEnvNames(
@@ -1431,6 +1454,8 @@ Returns { message, stepCount, recorded, savedTo }; \`recorded\`, not the status,
           ? { times: cc }
           : {};
 
+      const liveFailure = liveRunFailureWarning(params.command, toolResult);
+
       let step: FlowStep;
       let warning: string | undefined;
       if (captured?.selector) {
@@ -1494,7 +1519,16 @@ Returns { message, stepCount, recorded, savedTo }; \`recorded\`, not the status,
       // step's number and carrying the step itself, so a hand edit cannot pass
       // the verdict to whatever inherits that number (see
       // {@link RecordedStepWarning}).
-      const carried = waitWarning ?? runEnvWarning(step, warning);
+      // One entry per step. A failed live run takes it under its own kind, and
+      // any other warning on the step follows in the same entry, failure first.
+      const carried =
+        waitWarning ??
+        (liveFailure
+          ? {
+              kind: "failure" as const,
+              warning: warning ? `${liveFailure}; ${warning}` : liveFailure,
+            }
+          : runEnvWarning(step, warning));
       if (carried) {
         (session.stepWarnings ??= new Map()).set(stepCount, {
           ...carried,
@@ -1503,6 +1537,7 @@ Returns { message, stepCount, recorded, savedTo }; \`recorded\`, not the status,
       }
 
       const notes = [
+        ...(liveFailure ? [liveFailure] : []),
         ...(warning ? [warning] : []),
         ...(drift.output
           ? [

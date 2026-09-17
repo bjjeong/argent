@@ -65,6 +65,10 @@ on:
       - "packages/tool-server/test/flows/script/flow-script-output-run.test.ts"
       - "packages/tool-server/test/flows/script/flow-script-environment.test.ts"
       - "packages/tool-server/test/flows/script/flow-script-redaction.test.ts"
+      - "packages/tool-server/test/flows/script/flow-teardown-run.test.ts"
+      - "packages/tool-server/test/flows/script/flow-teardown-reports.test.ts"
+      - "packages/tool-server/test/flows/script/flow-teardown-secrets.test.ts"
+      - "packages/tool-server/test/flows/script/flow-teardown-recording.test.ts"
       - "packages/tool-server/src/tools/flows/flow-start-recording.ts"
       - "packages/tool-server/src/tools/flows/flow-finish-recording.ts"
       - "packages/tool-server/src/tools/flows/flow-insert-echo.ts"
@@ -138,6 +142,10 @@ jobs:
           test/flows/script/flow-script-output-run.test.ts
           test/flows/script/flow-script-environment.test.ts
           test/flows/script/flow-script-redaction.test.ts
+          test/flows/script/flow-teardown-run.test.ts
+          test/flows/script/flow-teardown-reports.test.ts
+          test/flows/script/flow-teardown-secrets.test.ts
+          test/flows/script/flow-teardown-recording.test.ts
 
       - name: Resolver unit tests on Windows (native-devtools-ios)
         working-directory: packages/native-devtools-ios

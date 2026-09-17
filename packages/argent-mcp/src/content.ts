@@ -217,6 +217,8 @@ export type FlowStepResult = {
   artifacts?: Record<string, unknown>;
   scriptLog?: string;
   scriptLogTruncated?: boolean;
+  /** Set on every report of a `teardown` list, fragment teardown lists included. */
+  teardown?: boolean;
   /** Legacy field from pre-report flow-execute results. */
   error?: string;
 };
@@ -254,6 +256,30 @@ function stepIndent(depth: unknown): string {
   return "  ".repeat(Math.min(depth, MAX_RENDER_DEPTH));
 }
 
+/**
+ * Whether each step, fed in order, opens a teardown section: it is a teardown
+ * step and the last step at its depth was not, or, first at its depth, the step
+ * that opened that depth was not. The same rule as the CLI's renderer.
+ */
+function createTeardownSections(): (step: FlowStepResult) => boolean {
+  // The last step at each open depth, shallowest first, as a stack so a result
+  // of ever-deeper steps stays linear.
+  const open: { depth: number; teardown: boolean }[] = [];
+  return (step) => {
+    const d = step.depth;
+    const depth = typeof d === "number" && Number.isInteger(d) && d > 0 ? d : 0;
+    while (open.length > 0 && open[open.length - 1]!.depth > depth) open.pop();
+    // What is left on top is the last report at this depth, or the one that
+    // opened it.
+    const top = open[open.length - 1];
+    const before = top?.teardown === true;
+    if (top?.depth === depth) open.pop();
+    const teardown = step.teardown === true;
+    open.push({ depth, teardown });
+    return teardown && !before;
+  };
+}
+
 function stepLabel(step: FlowStepResult): string {
   if (step.kind === "echo") return step.message ?? "";
   if (step.tool) return step.tool;
@@ -286,8 +312,12 @@ export async function flowRunToMcpContent(
     text: `Running flow "${result.flow}"${result.device ? ` on ${result.device}` : ""} (${result.steps.length} steps)`,
   });
 
+  const opensTeardown = createTeardownSections();
   for (let i = 0; i < result.steps.length; i++) {
     const step = result.steps[i]!;
+    if (opensTeardown(step)) {
+      blocks.push({ type: "text", text: `${stepIndent(step.depth)}── teardown ──` });
+    }
     const num = step.index !== undefined ? step.index + 1 : i + 1;
     // Status-less results (older tool-servers) render without a glyph.
     const glyph = step.status ? `${STATUS_GLYPH[step.status] ?? "•"} ` : "";

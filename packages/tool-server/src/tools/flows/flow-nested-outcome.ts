@@ -32,23 +32,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/**
+ * The first step of the child run that failed or errored, and, when a teardown
+ * step failed after it, that teardown step too. Teardown reports follow the
+ * step reports, so naming only the first would hide a cleanup that did not
+ * happen behind the failure that started it.
+ */
 function firstFailingStep(steps: unknown): string | undefined {
   if (!Array.isArray(steps)) return undefined;
+  let first: string | undefined;
   for (const entry of steps) {
     if (!isRecord(entry)) continue;
     if (entry.status !== "fail" && entry.status !== "error") continue;
-    // Typed checks rather than coercion: this report crossed the registry
-    // boundary as `unknown`, and an object here would render "[object Object]".
-    const what =
-      typeof entry.tool === "string"
-        ? entry.tool
-        : typeof entry.kind === "string"
-          ? entry.kind
-          : "step";
-    const why = typeof entry.reason === "string" ? entry.reason : "no reason given";
-    return `${what}: ${why}`;
+    const failed = describeFailedStep(entry);
+    if (first === undefined) {
+      first = failed;
+      if (entry.teardown === true) return first;
+    } else if (entry.teardown === true) {
+      return `${first}; then ${failed}`;
+    }
   }
-  return undefined;
+  return first;
+}
+
+function describeFailedStep(entry: Record<string, unknown>): string {
+  // Typed checks rather than coercion: this report crossed the registry
+  // boundary as `unknown`, and an object here would render "[object Object]".
+  const what =
+    typeof entry.tool === "string"
+      ? entry.tool
+      : typeof entry.kind === "string"
+        ? entry.kind
+        : "step";
+  const why = typeof entry.reason === "string" ? entry.reason : "no reason given";
+  return `${entry.teardown === true ? "teardown step " : ""}${what}: ${why}`;
 }
 
 function count(value: unknown): number {

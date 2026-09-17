@@ -185,7 +185,7 @@ export type FlowPersistMode = "host" | "client";
 
 export interface RecordedStepWarning {
   warning: string;
-  kind: "conversion" | "wait" | "env";
+  kind: "conversion" | "wait" | "env" | "failure";
   step: string;
 }
 
@@ -533,14 +533,30 @@ export type FlowStep =
 
 export type ScriptEnv = Record<string, string>;
 
+/**
+ * A parsed flow file. `teardown` is set exactly when the file has the key, an
+ * empty list included: every recording write rebuilds the file from this object
+ * alone ({@link serializeFlow}), so a key this type does not carry is deleted by
+ * the next append.
+ */
 export type FlowFile = {
   executionPrerequisite: string;
   env?: ScriptEnv;
   steps: FlowStep[];
+  teardown?: FlowStep[];
 };
 
 export function blockSteps(step: FlowStep): FlowStep[] | undefined {
   return isBlockStep(step) ? (step.steps satisfies FlowStep[]) : undefined;
+}
+
+/**
+ * The steps a run can reach in this file, the teardown list's after the steps,
+ * for the questions that must see both: whether a run needs or scopes a device,
+ * and whether a recorded fragment uses output.
+ */
+export function stepsAndTeardown(flow: FlowFile): FlowStep[] {
+  return flow.teardown ? [...flow.steps, ...flow.teardown] : flow.steps;
 }
 
 export function isBlockStep(step: FlowStep): step is BlockStep {
@@ -577,6 +593,10 @@ export function precedesLeadingLaunch(step: FlowStep): boolean {
   }
 }
 
+/**
+ * `steps` only: a teardown `launch` starts after the steps, so it says nothing
+ * about the state the flow starts from.
+ */
 function isE2eFlow(flow: FlowFile): boolean {
   const first = flow.steps.find((s) => !precedesLeadingLaunch(s));
   return first?.kind === "launch";
@@ -671,6 +691,7 @@ type YamlFlowFile = {
   env?: ScriptEnv;
   executionPrerequisite?: string;
   steps: YamlStep[];
+  teardown?: YamlStep[];
 };
 
 /**
@@ -2663,12 +2684,12 @@ export function refusesOutputReferences(step: FlowStep): boolean {
   }
 }
 
-function assertOutputReferences(steps: FlowStep[], trail: number[] = []): void {
+function assertOutputReferences(steps: FlowStep[], trail: number[] = [], label = "Step"): void {
   steps.forEach((step, i) => {
     const at = [...trail, i + 1];
-    assertStepOutputReferences(step, `Step ${at.join(".")} (\`${step.kind}\`)`);
+    assertStepOutputReferences(step, `${label} ${at.join(".")} (\`${step.kind}\`)`);
     const inner = blockSteps(step);
-    if (inner) assertOutputReferences(inner, at);
+    if (inner) assertOutputReferences(inner, at, label);
   });
 }
 
@@ -2686,7 +2707,16 @@ export type StepReferenceResolution<S extends FlowStep> =
       /** Whole-field `tool.args` references that gave something other than a string. */
       wholeFields: WholeFieldReference[];
     }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * Set when the field stopped on a reference whose paths all missed (not
+       * held, or held as `null`), with the kind of that field. A field resolves
+       * left to right and stops at its first problem, so a step has at most one.
+       */
+      miss?: { kind: Exclude<OutputFieldKind, "static"> };
+    };
 
 /**
  * A copy of `step` with every reference in its own fields resolved against
@@ -2731,7 +2761,13 @@ function resolveStepFields<S extends FlowStep>(
   for (const field of holds(copy)) {
     if (field.kind === "static") continue;
     const resolved = resolveOutputField(field.value, field.kind, document);
-    if (!resolved.ok) return { ok: false, reason: `${fieldLocator(field)}: ${resolved.reason}` };
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        reason: `${fieldLocator(field)}: ${resolved.reason}`,
+        ...(resolved.miss ? { miss: { kind: field.kind } } : {}),
+      };
+    }
     references.push(...resolved.references);
     if (resolved.wholeFieldType !== undefined) {
       wholeFields.push({
@@ -3069,6 +3105,9 @@ export function serializeFlow(flow: FlowFile): string {
     steps: flow.steps.map(toYamlStep),
   };
   if (flow.executionPrerequisite) doc.executionPrerequisite = flow.executionPrerequisite;
+  // Last, because it runs last. An empty list is written too: the author put the
+  // key there, and dropping it would change the file the author wrote.
+  if (flow.teardown) doc.teardown = flow.teardown.map(toYamlStep);
   // blockQuote: false — a block scalar is not round-trip-safe for our free-text
   // fields: whitespace-only lines inside a multi-line value are silently
   // stripped on re-parse (" \n" comes back as "\n"), and a block scalar's own
@@ -3136,6 +3175,10 @@ export function validateFlow(flow: FlowFile): void {
     );
   }
   assertOutputReferences(flow.steps);
+  if (flow.teardown) {
+    assertOutputReferences(flow.teardown, [], "Teardown step");
+    assertNoTeardownSnapshot(flow.teardown);
+  }
   if (isE2eFlow(flow) && flow.executionPrerequisite) {
     throw new FailureError(
       "A flow whose first step other than `echo:`/`script:` is a `launch` must not declare executionPrerequisite — it launches its own app and controls its start state. Drop that launch to make it a fragment, or drop executionPrerequisite.",
@@ -3147,6 +3190,41 @@ export function validateFlow(flow: FlowFile): void {
       }
     );
   }
+}
+
+/**
+ * What the name `teardown` cannot say about the failure path, so every message
+ * that introduces the key says it.
+ */
+const TEARDOWN_CONTRACT =
+  "`teardown` is a list of cleanup steps that runs after `steps` ends with pass, fail or " +
+  "error, but not after a cancel, and it stops at its first failed step.";
+
+/**
+ * A teardown runs after a failed run as well, and under `--update-baselines` a
+ * snapshot saves whatever the screen shows as the baseline, with no way to know
+ * that the run failed. A teardown cleans up; it does not check. Refused inside a
+ * `when` block too, which is only a condition around the same steps.
+ */
+function assertNoTeardownSnapshot(steps: FlowStep[], trail: number[] = []): void {
+  steps.forEach((step, i) => {
+    const at = [...trail, i + 1];
+    if (step.kind === "snapshot") {
+      throw new FailureError(
+        `Teardown step ${at.join(".")} (\`snapshot\`) cannot be in a teardown list: the teardown ` +
+          "also runs after a failed run, and with --update-baselines a snapshot there would save " +
+          "the screen that run left as the baseline. Move the snapshot into `steps`.",
+        {
+          error_code: FAILURE_CODES.FLOW_ENTRY_UNRECOGNIZED,
+          failure_stage: "flow_file_parse_step",
+          failure_area: "tool_server",
+          error_kind: "validation",
+        }
+      );
+    }
+    const inner = blockSteps(step);
+    if (inner) assertNoTeardownSnapshot(inner, at);
+  });
 }
 
 function readFlowHead(content: string): YamlFlowFile | undefined {
@@ -3229,12 +3307,35 @@ function readFlowHead(content: string): YamlFlowFile | undefined {
     });
   }
 
-  const topKeys: readonly string[] = ["executionPrerequisite", "steps", "env"];
+  const topKeys: readonly string[] = ["executionPrerequisite", "steps", "env", "teardown"];
   const unknownTop = Object.keys(parsed).filter((k) => !topKeys.includes(k));
   if (unknownTop.length > 0) {
     throw new FailureError(
       `Invalid flow file: ${describeUnknownKeys(unknownTop, topKeys)} — ` +
-        `allowed top-level keys: ${topKeys.join(", ")}`,
+        `allowed top-level keys: ${topKeys.join(", ")}. ${TEARDOWN_CONTRACT}`,
+      {
+        error_code: FAILURE_CODES.FLOW_FILE_INVALID,
+        failure_stage: "flow_file_parse",
+        failure_area: "tool_server",
+        error_kind: "validation",
+      }
+    );
+  }
+
+  // `teardown:` with nothing after it is YAML null. Refused rather than read as
+  // no teardown: an author who wrote the key meant a list, and a flow that
+  // silently lost its cleanup leaves the backend data behind on every run.
+  const teardown: unknown = (parsed as { teardown?: unknown }).teardown;
+  if ("teardown" in parsed && !Array.isArray(teardown)) {
+    const got =
+      teardown === null
+        ? "it is empty (null)"
+        : typeof teardown === "object"
+          ? "it is not a list"
+          : `it is a ${typeof teardown}`;
+    throw new FailureError(
+      `Invalid flow file: \`teardown\` must be a list of steps, like \`steps\`, but ${got}. ` +
+        `Write \`teardown: []\` for no cleanup, or remove the key. ${TEARDOWN_CONTRACT}`,
       {
         error_code: FAILURE_CODES.FLOW_FILE_INVALID,
         failure_stage: "flow_file_parse",
@@ -3282,15 +3383,17 @@ export function parseFlow(content: string): FlowFile {
     return { executionPrerequisite: "", steps: [] };
   }
 
-  const steps = parsed.steps.map((raw) => {
-    if (raw !== null && typeof raw === "object") return fromYamlStep(raw as YamlStep);
-    return badEntry(raw, "step must be an object");
-  });
+  const parseSteps = (list: YamlStep[]): FlowStep[] =>
+    list.map((raw) => {
+      if (raw !== null && typeof raw === "object") return fromYamlStep(raw);
+      return badEntry(raw, "step must be an object");
+    });
 
   const flow: FlowFile = {
     executionPrerequisite: parsed.executionPrerequisite ?? "",
     ...(parsed.env !== undefined ? { env: { ...(parsed.env as ScriptEnv) } } : {}),
-    steps,
+    steps: parseSteps(parsed.steps),
+    ...(parsed.teardown !== undefined ? { teardown: parseSteps(parsed.teardown) } : {}),
   };
   validateFlow(flow);
   return flow;
