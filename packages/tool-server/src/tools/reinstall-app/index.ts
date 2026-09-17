@@ -23,7 +23,7 @@ const zodSchema = z.object({
   appPath: z
     .string()
     .describe(
-      "Path to the app bundle. iOS: `.app` directory (e.g. ./build/.../MyApp.app). Android: `.apk` file (e.g. android/app/build/outputs/apk/debug/app-debug.apk). Vega: `.vpkg` file. Relative paths are resolved from the current working directory."
+      "Path to the app bundle. iOS: `.app` directory (e.g. ./build/.../MyApp.app); a physical iPhone also takes an `.ipa`. Android: `.apk` file (e.g. android/app/build/outputs/apk/debug/app-debug.apk). Vega: `.vpkg` file. Relative paths are resolved from the current working directory."
     ),
 });
 
@@ -46,7 +46,7 @@ export const reinstallAppTool: ToolDefinition<Params, ReinstallAppResult> = {
   },
   description: `Install or reinstall an app on the device. The previous installation (if any) is uninstalled first so app data and runtime permissions are cleared.
 Use for a full reinstall after rebuilding, or to start from a clean app state.
-Returns { reinstalled, bundleId }. The artifact is checked before anything is uninstalled, so a wrong path leaves the current installation in place: fails if the app path does not exist or does not match the platform (.app bundle directory for iOS, .apk file for Android, .vpkg file for Vega). A device can still reject a well-formed artifact at install time (wrong ABI, minimum OS version, signature mismatch), and in that case the previous installation is already gone.`,
+Returns { reinstalled, bundleId }. The artifact is checked before anything is uninstalled, so a wrong path leaves the current installation in place: fails if the app path does not exist or does not match the platform (.app bundle directory for an iOS simulator, .app or .ipa for a physical iPhone, .apk file for Android, .vpkg file for Vega). A device can still reject a well-formed artifact at install time (wrong ABI, minimum OS version, signature mismatch), and in that case the previous installation is already gone.`,
   zodSchema,
   capability,
   fileInputs: [{ target: "appPath", path: "${appPath}", kind: "tar-upload" }],

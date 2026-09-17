@@ -18,6 +18,25 @@ vi.mock("node:child_process", async (importOriginal) => ({
   },
 }));
 
+// homedir decides where the default CoreSimulator set lives; point it at a temp
+// dir so the container check can be exercised without a real simulator.
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const homedir = () => process.env.ARGENT_TEST_FAKE_HOME ?? actual.homedir();
+  return { ...actual, homedir, default: { ...actual, homedir } };
+});
+
+const devicectl = {
+  ensureDeviceReady: vi.fn(async (..._a: unknown[]) => {}),
+  uninstallApp: vi.fn(async (..._a: unknown[]) => {}),
+  installApp: vi.fn(async (..._a: unknown[]) => {}),
+};
+vi.mock("../src/utils/ios-device/devicectl", () => ({
+  ensureDeviceReady: (...a: unknown[]) => devicectl.ensureDeviceReady(...a),
+  uninstallApp: (...a: unknown[]) => devicectl.uninstallApp(...a),
+  installApp: (...a: unknown[]) => devicectl.installApp(...a),
+}));
+
 const vegaDevice = vi.fn(async (..._a: unknown[]) => ({ stdout: "Success", stderr: "" }));
 vi.mock("../src/utils/vega-cli", () => ({ vegaDevice: (...a: unknown[]) => vegaDevice(...a) }));
 
@@ -30,6 +49,8 @@ vi.mock("../src/utils/sim-remote", () => ({
 
 import { androidImpl } from "../src/tools/reinstall-app/platforms/android";
 import { iosImpl } from "../src/tools/reinstall-app/platforms/ios";
+import { iosDeviceImpl } from "../src/tools/reinstall-app/platforms/ios-device";
+import { assertNotInsideDeviceContainer } from "../src/tools/reinstall-app/validate-artifact";
 import { iosRemoteImpl } from "../src/tools/reinstall-app/platforms/ios-remote";
 import { vegaImpl } from "../src/tools/reinstall-app/platforms/vega";
 
@@ -56,6 +77,8 @@ beforeEach(() => {
   vegaDevice.mockClear();
   simctlUninstall.mockClear();
   simctlInstall.mockClear();
+  devicectl.uninstallApp.mockClear();
+  devicectl.installApp.mockClear();
 });
 
 function params(appPath: string) {
@@ -124,6 +147,67 @@ describe("reinstall-app rejects a bad artifact before uninstalling anything", ()
     expect(verbs).toHaveLength(0);
   });
 
+  it("ios: a real bundle that lives inside the target simulator's own container", async () => {
+    // The reported iOS case: the uninstall deletes the container, and with it
+    // the source bundle, so the install then fails on a path that is gone.
+    const home = join(TMP, "home");
+    const udid = "11111111-2222-3333-4444-555555555555";
+    const bundle = join(
+      home,
+      "Library/Developer/CoreSimulator/Devices",
+      udid,
+      "data/Containers/Bundle/Application/X/My.app"
+    );
+    mkdirSync(bundle, { recursive: true });
+    writeFileSync(join(bundle, "Info.plist"), "");
+    process.env.ARGENT_TEST_FAKE_HOME = home;
+    try {
+      await expect(
+        iosImpl.handler(
+          {} as never,
+          { udid, bundleId: "com.example.app", appPath: bundle } as never,
+          DEVICE
+        )
+      ).rejects.toThrow(/inside this simulator's own container/);
+      expect(execFileCalls).toHaveLength(0);
+
+      // The same bundle is fine to install on a different simulator.
+      await expect(
+        assertNotInsideDeviceContainer(bundle, "99999999-2222-3333-4444-555555555555")
+      ).resolves.toBeUndefined();
+
+      // A provider-namespaced id resolves to the CoreSimulator directory name.
+      await expect(assertNotInsideDeviceContainer(bundle, `ext:${udid}`, udid)).rejects.toThrow(
+        /own container/
+      );
+    } finally {
+      delete process.env.ARGENT_TEST_FAKE_HOME;
+    }
+  });
+
+  it("ios-device: a file that is neither a .app bundle nor an .ipa", async () => {
+    await expect(
+      iosDeviceImpl.handler({} as never, params(NOT_AN_ARTIFACT), DEVICE)
+    ).rejects.toThrow(/not an \.ipa/);
+    expect(devicectl.uninstallApp).not.toHaveBeenCalled();
+  });
+
+  it("ios-device: an .ipa that is not a zip archive", async () => {
+    const fakeIpa = join(TMP, "fake.ipa");
+    writeFileSync(fakeIpa, "not a zip");
+    await expect(iosDeviceImpl.handler({} as never, params(fakeIpa), DEVICE)).rejects.toThrow(
+      /not a zip archive/
+    );
+    expect(devicectl.uninstallApp).not.toHaveBeenCalled();
+  });
+
+  it("ios-device: a .app directory with no Info.plist", async () => {
+    await expect(iosDeviceImpl.handler({} as never, params(EMPTY_APP), DEVICE)).rejects.toThrow(
+      /Info\.plist/
+    );
+    expect(devicectl.uninstallApp).not.toHaveBeenCalled();
+  });
+
   it("says the installation was left alone, so the caller knows the device is intact", async () => {
     const err = await androidImpl
       .handler({} as never, params(NOT_AN_ARTIFACT), DEVICE)
@@ -153,6 +237,21 @@ describe("reinstall-app still installs a good artifact", () => {
     await expect(androidImpl.handler({} as never, params(upper), DEVICE)).resolves.toMatchObject({
       reinstalled: true,
     });
+  });
+
+  it("ios-device: accepts a zip-backed .ipa and a well-formed .app", async () => {
+    const ipa = join(TMP, "Real.ipa");
+    writeFileSync(ipa, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const app = join(TMP, "Real.app");
+    mkdirSync(app, { recursive: true });
+    writeFileSync(join(app, "Info.plist"), "");
+
+    for (const appPath of [ipa, app]) {
+      await expect(
+        iosDeviceImpl.handler({} as never, params(appPath), DEVICE)
+      ).resolves.toMatchObject({ reinstalled: true });
+      expect(devicectl.installApp).toHaveBeenLastCalledWith("device-1", appPath);
+    }
   });
 
   it("android: a first-time install is unaffected when the uninstall fails", async () => {
