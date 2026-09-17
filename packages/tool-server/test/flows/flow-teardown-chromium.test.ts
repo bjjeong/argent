@@ -344,6 +344,128 @@ describe("after a fragment's teardown list, the run goes back to its chromium in
     ]);
   });
 
+  it("boots the root's leading launch again, with its args, when a fragment teardown relaunched that app", async () => {
+    // The teardown relaunch replaces the instance booted for the root's launch.
+    // Settling for the replacement would start the root on a used window that
+    // lacks the root launch's args.
+    const dir = await writeFlows({
+      "flow.yaml":
+        "steps:\n" +
+        "  - run: reset.yaml\n" +
+        "  - launch: { chromium: { path: ./shop, args: [--probe] } }\n" +
+        "  - tool: screenshot\n",
+      "reset.yaml":
+        "steps: []\nteardown:\n  - launch: { chromium: ./shop }\n  - tool: screenshot\n",
+    });
+    const registry = makeRegistry();
+
+    const result = await runFlow(registry, dir);
+
+    expect(outline(result)).toEqual([
+      { kind: "run", status: "pass" },
+      {
+        kind: "launch",
+        status: "pass",
+        depth: 1,
+        teardown: true,
+        reason:
+          "booted chromium instance chromium-cdp-12346 — retired chromium-cdp-12345 (same app relaunched)",
+      },
+      { kind: "tool", status: "pass", depth: 1, teardown: true },
+      {
+        kind: "launch",
+        status: "pass",
+        reason:
+          "booted chromium instance chromium-cdp-12347 — retired chromium-cdp-12346 (same app relaunched)",
+      },
+      { kind: "tool", status: "pass" },
+    ]);
+    expect(result.ok).toBe(true);
+    expect(bootElectronApp.mock.calls.map((call) => call[0].extraArgs)).toEqual([
+      ["--probe"],
+      undefined,
+      ["--probe"],
+    ]);
+    expect(events).toEqual([
+      boot("shop"),
+      front(12345),
+      kill(12345),
+      boot("shop"),
+      front(12346),
+      shot(12346),
+      kill(12346),
+      boot("shop"),
+      front(12347),
+      shot(12347),
+      kill(12347),
+    ]);
+  });
+
+  it("boots the root's leading launch again when a fragment teardown step used its instance", async () => {
+    const dir = await writeFlows({
+      "flow.yaml":
+        "steps:\n" +
+        "  - run: reset.yaml\n" +
+        "  - launch: { chromium: ./shop }\n" +
+        "  - tool: screenshot\n",
+      "reset.yaml": "steps: []\nteardown:\n  - tool: screenshot\n",
+    });
+    const registry = makeRegistry();
+
+    const result = await runFlow(registry, dir);
+
+    expect(outline(result)).toEqual([
+      { kind: "run", status: "pass" },
+      { kind: "tool", status: "pass", depth: 1, teardown: true },
+      {
+        kind: "launch",
+        status: "pass",
+        reason:
+          "booted chromium instance chromium-cdp-12346 — retired chromium-cdp-12345 (same app relaunched)",
+      },
+      { kind: "tool", status: "pass" },
+    ]);
+    expect(result.ok).toBe(true);
+    expect(events).toEqual([
+      boot("shop"),
+      front(12345),
+      shot(12345),
+      kill(12345),
+      boot("shop"),
+      front(12346),
+      shot(12346),
+      kill(12346),
+    ]);
+  });
+
+  it("settles the root's leading launch when a fragment teardown ran only echo and script steps", async () => {
+    const dir = await writeFlows({
+      "flow.yaml":
+        "steps:\n" +
+        "  - run: reset.yaml\n" +
+        "  - launch: { chromium: ./shop }\n" +
+        "  - tool: screenshot\n",
+      "reset.yaml": "steps: []\nteardown:\n  - echo: cleaning\n  - script: { path: ./clean.mjs }\n",
+      "clean.mjs":
+        `import fs from "node:fs";\n` +
+        `fs.writeFileSync(new URL("./clean.mark", import.meta.url), "cleaned");\n`,
+    });
+    const registry = makeRegistry();
+
+    const result = await runFlow(registry, dir);
+
+    expect(fsSync.existsSync(path.join(dir, "clean.mark"))).toBe(true);
+    expect(outline(result)).toEqual([
+      { kind: "run", status: "pass" },
+      { kind: "echo", status: "pass", depth: 1, teardown: true },
+      { kind: "script", status: "pass", depth: 1, teardown: true },
+      { kind: "launch", status: "pass", reason: "booted chromium instance chromium-cdp-12345" },
+      { kind: "tool", status: "pass" },
+    ]);
+    expect(result.ok).toBe(true);
+    expect(events).toEqual([boot("shop"), front(12345), shot(12345), kill(12345)]);
+  });
+
   it("goes back to a pinned --device instance after a fragment teardown boots another app", async () => {
     const dir = await writeFlows({
       "flow.yaml":

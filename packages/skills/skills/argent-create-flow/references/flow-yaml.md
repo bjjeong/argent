@@ -363,7 +363,7 @@ teardown:
 - If a fragment's teardown step fails or errors, the parent's remaining steps skip and the parent's teardown still runs.
 - Put backend cleanup scripts before device steps, so an app crash cannot stop the cleanup.
 - Parsing rejects a `snapshot` teardown step, also inside `when`. A `snapshot` that a teardown `run:` reaches errors.
-- A teardown `launch:` does not make a flow e2e. On Chromium it always boots a new instance. After a fragment's teardown the run returns to the instance it was on. If the run booted that instance and the teardown launched its app again, the run moves to the app's new instance; if that launch failed, the run stays where the teardown left it.
+- A teardown `launch:` does not make a flow e2e. On Chromium it always boots a new instance. After a fragment's teardown the run returns to the instance it was on. If the run booted that instance and the teardown launched its app again, the run moves to the app's new instance; if that launch failed, the run stays where the teardown left it. A fragment's teardown can run before the run's first launch. If it used the instance booted for that launch (any step except `echo` and `script`) or launched its app again, that launch boots a new instance with its own `args`.
 
 ### Teardown output
 

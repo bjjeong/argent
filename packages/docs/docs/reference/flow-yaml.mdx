@@ -650,6 +650,12 @@ Argent reads only `steps` to find the [shape](#file-shape) of a flow. A `launch:
 On Chromium, these rules apply:
 
 - A teardown `launch:` step always operates as a later launch. It boots a new instance and stops the earlier instance of that app that the run booted.
+- The teardown list of a fragment can run before the first `launch:` step of the run. If Argent booted the app of that `launch:` step before step 1, the `launch:` step boots a new instance in these cases:
+  - A teardown step that is not an `echo` or `script` step operated on that instance.
+  - A teardown `launch:` step started that app again.
+
+  Thus the `launch:` step starts on a new page, with its own `args`.
+
 - After the teardown list of a fragment, Argent moves the run back to the instance that the run used before that list. If the run booted that instance and the list launched that app again, Argent moves the run to the new instance of the app. If that launch failed, the run stays on the instance that the list used last. When Argent moves the run, Argent also brings the page of that instance to the front.
 
 ### Output in a teardown list

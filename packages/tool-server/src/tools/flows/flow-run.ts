@@ -527,6 +527,8 @@ async function runLaunch(
  * only the run's FIRST launch can be satisfied without booting — settling the
  * boot {@link resolveRunDevice} hoisted, or attaching to an instance the runner
  * does not own. Later launches boot their own ({@link bootChromiumForLaunch}).
+ * So does a first launch that finds the hoisted instance used or replaced by a
+ * fragment's teardown list ({@link ExecState.hoisted}).
  *
  * A teardown launch always boots, and leaves the first launch to the steps.
  * Whether the steps reached their leading launch depends on where they
@@ -549,6 +551,7 @@ async function runChromiumLaunch(
 
   const owned = ownedInstance(state);
   if (owned) {
+    if (owned !== state.hoisted) return bootChromiumForLaunch(state, app);
     const declared = await resolveAppPath(spec.path, state.flowsDir);
     if (declared !== owned.appPath) {
       return {
@@ -750,6 +753,15 @@ interface ExecState extends Omit<ActionEnv, "device"> {
   stopped: boolean;
   pinned: boolean;
   owned: BootedChromium[];
+  /**
+   * The instance {@link resolveRunDevice} booted for the leading launch, while
+   * it is still fresh. Only `echo` and `script` steps precede that launch in the
+   * steps, but a fragment's teardown list can run any step before it. A teardown
+   * step on this instance clears the field ({@link noteTeardownUse}), and a
+   * teardown relaunch of its app replaces the instance, so the first launch then
+   * boots a new one.
+   */
+  hoisted?: BootedChromium;
   chromiumLaunched: boolean;
   snapshotApps: Map<string, string>;
   attachedDeviceId?: string;
@@ -1117,6 +1129,7 @@ Returns a per-step report: the first failure stops the run and the rest report a
         stopped: false,
         pinned: statusBarPinned,
         owned: resolved.booted ? [resolved.booted] : [],
+        ...(resolved.booted ? { hoisted: resolved.booted } : {}),
         chromiumLaunched: false,
         snapshotApps: new Map(),
         projectRoot: params.project_root,
@@ -1589,10 +1602,21 @@ async function execSteps(state: ExecState, steps: FlowStep[], scope: StepScope):
       continue;
     }
 
+    if (scope.teardown) noteTeardownUse(state, step);
     const report = await resolveAndExecLeafStep(state, step, index, scope);
     pushReport(state, report);
     if (report.status === "fail" || report.status === "error") state.stopped = true;
   }
+}
+
+/**
+ * Mark the hoisted instance as used when a teardown step acts on it. `echo` and
+ * `script` do not act on it, as in {@link scanLeadingLaunch}, and a `launch`
+ * boots an instance of its own.
+ */
+function noteTeardownUse(state: ExecState, step: FlowStep): void {
+  if (!state.hoisted || step.kind === "launch" || precedesLeadingLaunch(step)) return;
+  if (ownedInstance(state) === state.hoisted) state.hoisted = undefined;
 }
 
 function reportBlockSkipped(
