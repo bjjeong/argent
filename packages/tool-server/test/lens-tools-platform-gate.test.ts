@@ -65,5 +65,6 @@ describe("the flag's declared platforms match where the tools actually register"
       const registered = createRegistry().getTool("propose_variant") !== undefined;
       expect(registered, `platform: ${platform}`).toBe(declared!.includes(platform));
     }
-  });
+    // Three cold imports of the whole registry.
+  }, 30_000);
 });
