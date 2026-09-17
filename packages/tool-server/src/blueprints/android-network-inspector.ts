@@ -758,12 +758,16 @@ function createInspector(
     if (kind === "post" && !record.request.hasPostData) {
       return Promise.resolve(unavailable("the request has no body"));
     }
+    // A request can also fail after its headers arrived, as when the body
+    // breaks off or the app stops reading it.
     if (kind === "response" && record.state !== "complete") {
       return Promise.resolve(
         unavailable(
-          record.state === "failed"
-            ? "the request failed before a response body arrived"
-            : "the response has not finished yet"
+          record.state !== "failed"
+            ? "the response has not finished yet"
+            : record.response
+              ? "the response failed before its body finished"
+              : "the request failed before a response arrived"
         )
       );
     }

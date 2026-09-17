@@ -1038,6 +1038,57 @@ describe("AndroidNetworkInspector against a fake agent socket", () => {
     expect(failed.errorText).toBe("net::ERR_CONNECTION_RESET");
     expect(failed.timing.durationMs).toBeGreaterThanOrEqual(250);
     expect(failed.timing.durationMs).toBeLessThan(5_000);
+    expect(await api.responseBody(failed.id)).toMatchObject({
+      available: false,
+      reason: "the request failed before a response arrived",
+    });
+  });
+
+  it("keeps the response of a request that fails after its headers, and asks the agent for no body", async () => {
+    const api = await armedInspector();
+    const agent = agents[0]!;
+    agent.event("Network.requestWillBeSent", {
+      requestId: "req-1",
+      request: { url: "https://example.com/stream", method: "GET", headers: {} },
+      timestamp: 1000,
+      wallTime: 1000,
+    });
+    agent.event("Network.responseReceived", {
+      requestId: "req-1",
+      timestamp: 1000.1,
+      type: "Other",
+      response: {
+        url: "https://example.com/stream",
+        status: 200,
+        statusText: "OK",
+        headers: { "Content-Type": "text/event-stream" },
+        mimeType: "text/event-stream",
+      },
+    });
+    await vi.waitFor(() => expect(api.records(8081)[0]?.state).toBe("headers"));
+    const id = api.records(8081)[0]!.id;
+    expect(await api.responseBody(id)).toMatchObject({
+      available: false,
+      reason: "the response has not finished yet",
+    });
+
+    agent.event("Network.loadingFailed", {
+      requestId: "req-1",
+      timestamp: 1000.5,
+      errorText: "stream was reset: CANCEL",
+      canceled: true,
+    });
+    await vi.waitFor(() => expect(api.records(8081)[0]?.state).toBe("failed"));
+
+    expect(api.records(8081)[0]).toMatchObject({
+      errorText: "stream was reset: CANCEL",
+      response: { status: 200, mimeType: "text/event-stream" },
+    });
+    expect(await api.responseBody(id)).toMatchObject({
+      available: false,
+      reason: "the response failed before its body finished",
+    });
+    expect(agent.requests.map((r) => r.method)).toEqual(["Network.enable"]);
   });
 
   it("times a finished request by the arrival of its events", async () => {
