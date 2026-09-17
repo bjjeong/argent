@@ -12,7 +12,6 @@ const OUTPUT_FPS = 30;
 // without it they would silently stop intercepting and CI would exec a real
 // ffmpeg inside a fake-timers test.
 export { resolveFfmpeg, ffmpegUnavailableMessage } from "./ffmpeg-binary";
-export type { FfmpegResolution } from "./ffmpeg-binary";
 
 // Watermark geometry, all relative to the frame WIDTH so it scales with any
 // device resolution.

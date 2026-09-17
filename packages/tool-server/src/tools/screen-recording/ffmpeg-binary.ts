@@ -73,7 +73,7 @@ const LIBX264_MARKER = /\bencoder\s+libx264\b/i;
 /** Point argent at a specific ffmpeg when discovery cannot find a usable one. */
 const FFMPEG_OVERRIDE_ENV = "ARGENT_FFMPEG";
 
-export type FfmpegResolution =
+type FfmpegResolution =
   | { ok: true; path: string; origin: "override" | "path" | "fallback" }
   | { ok: false; reason: "missing" | "unusable"; override: string | null; tried: string[] };
 
