@@ -472,10 +472,8 @@ export function buildTextTree(
     // named element or a branch point, and dropping those is how a caller ends
     // up concluding a component does not exist when it was merely trimmed.
     lines.push(
-      `... maxNodes=${opts.maxNodes} could not be met: ${shortfall} node${shortfall > 1 ? "s" : ""} over budget. ` +
-        `Only structural wrappers are collapsible; the rest carry a name, text, testID or a branch, ` +
-        `so they are kept rather than dropped. Narrow the tree instead — inspect a subtree with ` +
-        `debugger-inspect-element, or raise maxNodes.`
+      `... maxNodes=${opts.maxNodes} not reachable: ${shortfall} node${shortfall > 1 ? "s" : ""} over budget ` +
+        `(only wrapper chains collapse); narrow with debugger-inspect-element.`
     );
   }
 
@@ -563,11 +561,8 @@ const zodSchema = z.object({
     .number()
     .optional()
     .describe(
-      "Target node budget. When the tree is larger, single-child wrapper chains are " +
-        "collapsed to approach it, preserving both root structure and leaf elements. " +
-        "Nodes carrying a name you could target — text, testID, accessibility label — and " +
-        "branch points are never dropped, so a tree made mostly of those can still exceed " +
-        "the budget; the response says so and by how much rather than truncating silently. " +
+      "Target node budget. When exceeded, intermediate single-child " +
+        "wrapper chains are collapsed to preserve both root structure and leaf elements. " +
         "Default: no limit."
     ),
   includeSkipped: z
@@ -600,7 +595,7 @@ This is the preferred element discovery tool for React Native apps. More informa
 Workflow:
   1. Call this tool to get the component tree.
   2. Find the desired element by name, text, testID, or accessibilityLabel.
-  3. Use the (tap: x,y) coordinates directly with the tap tool. An element whose centre lies outside the viewport is listed with (off-screen: x,y) instead — those coordinates cannot be tapped, and their sign tells you which way to scroll first.
+  3. Use the (tap: x,y) coordinates directly with the tap tool.
 
 Call again after navigation or state changes since positions may shift.
 Set includeSkipped=true to see a summary of all filtered components.

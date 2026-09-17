@@ -341,13 +341,13 @@ describe("buildTextTree — maxNodes accounting and budget honesty (issue #631)"
 
     // Truncating here would let a caller conclude Row 6 does not exist.
     for (let i = 1; i <= 6; i++) expect(result).toContain(`Row ${i}`);
-    expect(result).toContain("could not be met");
+    expect(result).toContain("not reachable");
     expect(result).toContain("5 nodes over budget");
   });
 
   it("says nothing extra when the budget is met", () => {
     const result = buildTextTree(wrapperChain(), { onScreenOnly: false, maxNodes: 50 });
-    expect(result).not.toContain("could not be met");
+    expect(result).not.toContain("not reachable");
     expect(result).not.toContain("collapsed");
   });
 
