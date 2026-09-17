@@ -16,14 +16,14 @@ import { adbShell, shellQuote } from "../../../utils/adb";
  * any package whose layout we failed to parse.
  */
 
-export interface PackagePermissionState {
+interface PackagePermissionState {
   /** Permissions the manifest declares. Undefined when the section was absent. */
   requested?: ReadonlySet<string>;
   /** Runtime grant state for user 0. Undefined when no runtime block was found. */
   runtime?: ReadonlyMap<string, boolean>;
 }
 
-export type PermissionVerdict =
+type PermissionVerdict =
   /** Observed in the state the action asked for. */
   | { kind: "confirmed" }
   /** Observed NOT to be in that state, with a reason worth showing the caller. */
@@ -131,10 +131,7 @@ function runtimeForUserZero(lines: string[], from: number, until: number): strin
  * Anything unrecognised yields `undefined` fields rather than empty ones — see
  * the note on the interface.
  */
-export function parsePackagePermissionState(
-  dump: string,
-  bundleId: string
-): PackagePermissionState {
+function parsePackagePermissionState(dump: string, bundleId: string): PackagePermissionState {
   // adb on Windows inserts CR; every match below is on trimmed text, but the
   // split has to tolerate both endings.
   const lines = dump.split(/\r?\n/);
