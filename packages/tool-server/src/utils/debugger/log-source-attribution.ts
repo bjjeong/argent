@@ -31,7 +31,7 @@ interface StackTrace {
  * with no file is authoritative-looking and useless, which is the failure this module
  * exists to prevent.
  */
-export interface LogSource {
+interface LogSource {
   file: string;
   /** 1-based, matching what an editor shows. */
   line: number;

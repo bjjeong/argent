@@ -325,6 +325,23 @@ describe("SourceMapsRegistry.toOriginalPosition", () => {
       expect(pos?.line1Based).toBe(99);
     });
 
+    it("drops the superseded map when a reload re-registers the same URL", async () => {
+      const registry = new SourceMapsRegistry("/[metro-project]");
+      registry.registerFromScriptParsed(BUNDLE_URL, "2", metroShapedMap());
+      await registry.waitForPending();
+      registry.registerFromScriptParsed(BUNDLE_URL, "12", metroShapedMap());
+      await registry.waitForPending();
+
+      // The old script's map would be a second fully parsed copy of the bundle, kept for
+      // a scriptId that can no longer emit frames.
+      expect(
+        registry.toOriginalPosition({ scriptId: "12", line0Based: 190457, column0Based: 15 })
+      ).not.toBeNull();
+      expect(
+        registry.toOriginalPosition({ scriptId: "2", line0Based: 190457, column0Based: 15 })
+      ).toBeNull();
+    });
+
     it("keeps only the most recent maps so long sessions do not accumulate them", async () => {
       const registry = new SourceMapsRegistry("/[metro-project]");
       for (let i = 0; i < 10; i++) {

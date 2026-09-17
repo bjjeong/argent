@@ -1,12 +1,8 @@
 import { SourceMapConsumer } from "source-map-js";
 
-// Only http/https URLs whose host is a loopback name are allowed to be
-// fetched by the source-map registry. The legitimate caller is Metro, which
-// always emits absolute http://localhost:<port>/<bundle>.map URLs over CDP.
-// Anything else (e.g., a malicious app's script setting //# sourceMappingURL
-// to http://attacker.example/, or http://169.254.169.254/<cloud-metadata>)
-// would otherwise turn the tool-server into a blind fetcher of attacker-
-// chosen URLs from the host network.
+// SSRF guard: an attacker-set //# sourceMappingURL must not turn the
+// tool-server into a fetcher of arbitrary host-network URLs. Metro, the only
+// legitimate caller, emits http://localhost:<port>/<bundle>.map over CDP.
 const ALLOWED_SOURCE_MAP_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 export function isAllowedSourceMapURL(raw: string): boolean {
@@ -17,14 +13,10 @@ export function isAllowedSourceMapURL(raw: string): boolean {
     return false;
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  // Metro source-map URLs always end in `.map` (the query string, if any,
-  // lives in parsed.search, not pathname). Requiring it shrinks the residual
-  // loopback-to-loopback surface: an attacker-set sourceMapURL can at most
-  // make us GET a *.map path on a loopback port, not an arbitrary endpoint
-  // (e.g. another local dev tool's /shutdown or /json).
+  // Metro source-map URLs always end in `.map`; requiring it keeps an
+  // attacker-set sourceMapURL off other loopback endpoints (/shutdown, /json).
   if (!parsed.pathname.endsWith(".map")) return false;
-  // Node's URL parser keeps the brackets on IPv6 hostnames ("[::1]"), strip
-  // them before consulting the allowlist.
+  // Node's URL parser keeps the brackets on IPv6 hostnames ("[::1]").
   const hostname =
     parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]")
       ? parsed.hostname.slice(1, -1)
@@ -33,11 +25,13 @@ export function isAllowedSourceMapURL(raw: string): boolean {
 }
 
 // Source-map bodies are buffered into memory before JSON.parse. A malicious
-// loopback responder (the residual SSRF target) could otherwise stream an
-// unbounded body and OOM the tool-server. 64 MiB is well above any real RN
-// bundle's source map (~tens of MiB at most).
+// loopback responder could otherwise stream an unbounded body, OOM the
+// tool-server, and hold `waitForPending()` — and with it `debugger-connect` —
+// open for as long as it keeps writing. 64 MiB is well above any real RN
+// bundle's source map.
 const MAX_SOURCE_MAP_BYTES = 64 * 1024 * 1024;
 
+/** Read a source-map response under a byte cap and parse it as JSON. */
 export async function readCappedJson(
   res: { headers: { get(name: string): string | null }; body: unknown; json(): Promise<unknown> },
   maxBytes = MAX_SOURCE_MAP_BYTES
@@ -47,10 +41,8 @@ export async function readCappedJson(
     throw new Error(`source map body too large (content-length ${declared} > ${maxBytes})`);
   }
   const body = res.body as ReadableStream<Uint8Array> | null | undefined;
-  if (!body || typeof body.getReader !== "function") {
-    // No stream available (e.g. a test stub) — fall back to the plain parse.
-    return res.json();
-  }
+  // No stream available (e.g. a test stub) — fall back to the plain parse.
+  if (!body || typeof body.getReader !== "function") return res.json();
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -67,13 +59,6 @@ export async function readCappedJson(
     }
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-}
-
-export interface GeneratedPosition {
-  scriptUrl: string;
-  scriptId: string;
-  line1Based: number;
-  column0Based: number;
 }
 
 /**
@@ -107,7 +92,6 @@ interface RegisteredMap {
   scriptUrl: string;
   scriptId: string;
   consumer: SourceMapConsumer;
-  sources: string[];
   /**
    * Sources the map's ignore list marks as third-party, as resolved source strings
    * (the same form `originalPositionFor` returns). Empty when `hasIgnoreList` is false.
@@ -118,24 +102,34 @@ interface RegisteredMap {
 
 // Parsing a map's mappings is lazy in source-map-js, but once paid it retains both the
 // generated and original mapping arrays — on a large Metro bundle that is ~90 MB per map.
-// Registrations accumulate across Fast Refresh reloads and lazy chunk loads, so keep only
-// the most recent few; evicted maps are dropped so their consumers can be collected.
+// A re-registered script URL replaces its predecessor, and distinct scripts (lazy chunks)
+// are capped at the most recent few; dropped maps' consumers can then be collected.
 // Lookups miss for evicted scripts, which degrades to the caller's unmapped fallback.
 const MAX_REGISTERED_MAPS = 4;
 
+/**
+ * Fetches and keeps the source maps `Debugger.scriptParsed` events point at, so console
+ * log call frames can be mapped back to the original source that emitted them (see
+ * `log-source-attribution.ts`).
+ *
+ * `waitForPending()` gives callers a defined moment: every fetch this session started
+ * has settled. That is what `debugger-status` reports as `sourceMapReady`, and it is
+ * weaker than it sounds — a map Metro answered 404 for has settled, and a `data:` or
+ * allowlist-rejected URL settles without a fetch.
+ */
 export class SourceMapsRegistry {
   private maps: RegisteredMap[] = [];
   private pendingRegistrations: Promise<void>[] = [];
-  /** Empty on runtimes that report no project root (legacy Metro, Vega). */
-  readonly projectRoot: string;
-
-  constructor(projectRoot: string) {
-    this.projectRoot = projectRoot;
-  }
 
   /**
-   * Begin fetching and registering a source map from a Debugger.scriptParsed event.
-   * Returns immediately; use `waitForPending()` to block until all maps are loaded.
+   * @param projectRoot Used to relativise absolute source paths. Empty on runtimes that
+   *   report no project root (legacy Metro, Vega).
+   */
+  constructor(readonly projectRoot: string = "") {}
+
+  /**
+   * Begin fetching the source map a Debugger.scriptParsed event points at.
+   * Returns immediately; use `waitForPending()` to block until every fetch has settled.
    */
   registerFromScriptParsed(
     scriptUrl: string,
@@ -152,49 +146,6 @@ export class SourceMapsRegistry {
     this.pendingRegistrations = [];
   }
 
-  /**
-   * Resolve an original source file + line to its generated position in the bundle.
-   *
-   * `filePath` can be:
-   *   - relative to project root, e.g. "App.tsx" or "src/components/Foo.tsx"
-   *   - absolute, e.g. "/Users/.../App.tsx"
-   *   - aliased, e.g. "/[metro-project]/App.tsx"
-   */
-  toGeneratedPosition(
-    filePath: string,
-    line1Based: number,
-    column0Based: number = 0
-  ): GeneratedPosition | null {
-    const candidates = this.buildSourceCandidates(filePath);
-
-    for (const map of this.maps) {
-      for (const candidate of candidates) {
-        if (!map.sources.some((s) => s === candidate)) continue;
-
-        try {
-          const pos = map.consumer.generatedPositionFor({
-            source: candidate,
-            line: line1Based,
-            column: column0Based,
-            bias: SourceMapConsumer.LEAST_UPPER_BOUND,
-          });
-          if (pos.line !== null) {
-            return {
-              scriptUrl: map.scriptUrl,
-              scriptId: map.scriptId,
-              line1Based: pos.line,
-              column0Based: pos.column ?? 0,
-            };
-          }
-        } catch {
-          // try next candidate
-        }
-      }
-    }
-
-    return null;
-  }
-
   /** True once at least one source map has been registered. O(1) guard for hot paths. */
   hasMaps(): boolean {
     return this.maps.length > 0;
@@ -203,9 +154,9 @@ export class SourceMapsRegistry {
   /**
    * Resolve a generated (bundle) position back to its original source position.
    *
-   * The inverse direction of `toGeneratedPosition`. Returns null when no registered map
-   * owns the frame's script, or when the map has no mapping for that position — callers
-   * must treat null as "unknown" and fall back, never as "line 0".
+   * Returns null when no registered map owns the frame's script, or when the map has no
+   * mapping for that position — callers must treat null as "unknown" and fall back,
+   * never as "line 0".
    */
   toOriginalPosition(frame: GeneratedFrame): OriginalLocation | null {
     const map = this.selectMap(frame.scriptId, frame.scriptUrl);
@@ -214,10 +165,7 @@ export class SourceMapsRegistry {
     try {
       // CDP lines are 0-based; source-map generated lines are 1-based.
       const line = frame.line0Based + 1;
-      let pos = map.consumer.originalPositionFor({
-        line,
-        column: frame.column0Based,
-      });
+      let pos = map.consumer.originalPositionFor({ line, column: frame.column0Based });
       if (pos.source === null || pos.line === null) {
         // The default (greatest-lower-bound) search finds nothing when the reported
         // column precedes the first mapping on that line — which is the common case for
@@ -272,98 +220,52 @@ export class SourceMapsRegistry {
     return null;
   }
 
-  /**
-   * Find which source map source path matches the given file path.
-   * Returns the matched source string or null.
-   */
-  findMatchingSource(filePath: string): string | null {
-    const candidates = this.buildSourceCandidates(filePath);
-    for (const map of this.maps) {
-      for (const candidate of candidates) {
-        if (map.sources.includes(candidate)) return candidate;
-      }
-    }
-    return null;
-  }
-
-  private buildSourceCandidates(filePath: string): string[] {
-    const normalized = filePath.replace(/\\/g, "/").replace(/^\.\//, "");
-    const candidates: string[] = [];
-
-    // If already aliased or absolute, try as-is first
-    if (normalized.startsWith("/")) {
-      candidates.push(normalized);
-    }
-
-    // Aliased: /[metro-project]/path
-    candidates.push(`/[metro-project]/${normalized}`);
-
-    // Absolute: projectRoot/path
-    if (this.projectRoot) {
-      candidates.push(`${this.projectRoot}/${normalized}`);
-    }
-
-    // Try suffix matching as last resort: find any source ending with /filePath
-    const suffix = normalized.startsWith("/") ? normalized : `/${normalized}`;
-    for (const map of this.maps) {
-      for (const src of map.sources) {
-        if (src.endsWith(suffix) && !candidates.includes(src)) {
-          candidates.push(src);
-        }
-      }
-    }
-
-    return candidates;
-  }
-
   private async doRegister(
     scriptUrl: string,
     scriptId: string,
     sourceMapURL: string
   ): Promise<void> {
     try {
+      // Every use of `sourceMapURL` belongs INSIDE the `try`. The value is a bare cast
+      // over socket JSON — `params.sourceMapURL as string | undefined` in
+      // `cdp-client.ts`, forwarded unchecked — and `registerFromScriptParsed` only
+      // rejects falsy, so a CDP peer that sends a number reaches `.startsWith` and
+      // throws. In here that is skipped like any other malformed map. Outside, the
+      // throw escapes as a rejected promise nothing awaits before the next tick, which
+      // `index.ts` turns into `crashShutdown` — the whole tool-server and every device
+      // session it owns, for one bad field.
       let rawData: unknown;
-
       if (sourceMapURL.startsWith("data:")) {
-        const base64Part = sourceMapURL.split(",")[1];
-        if (!base64Part) return;
-        const decoded = Buffer.from(base64Part, "base64").toString("utf-8");
-        rawData = JSON.parse(decoded);
+        // An inline map needs no fetch or allowlist, but gets the same size cap.
+        const payload = sourceMapURL.slice(sourceMapURL.indexOf(",") + 1);
+        if (payload.length > (MAX_SOURCE_MAP_BYTES * 4) / 3) return;
+        rawData = JSON.parse(Buffer.from(payload, "base64").toString("utf-8"));
       } else {
         if (!isAllowedSourceMapURL(sourceMapURL)) return;
-        // `redirect: "error"` so a loopback URL that passes the allowlist
-        // can't 302 us onto an internal/metadata host (the redirect target
-        // is never re-validated otherwise). Metro never redirects .map URLs,
-        // so this is behaviour-preserving for the legitimate path.
+        // The redirect target is never re-validated, so without
+        // `redirect: "error"` an allowlisted loopback URL could 302 us onto
+        // an internal host. Metro never redirects .map URLs.
         const res = await fetch(sourceMapURL, { redirect: "error" });
         if (!res.ok) return;
         rawData = await readCappedJson(res);
       }
 
+      // SourceMapConsumer drops unknown keys, so the ignore list is read off the raw JSON.
       const consumer = new SourceMapConsumer(rawData as any);
       const consumerSources = (consumer as any).sources;
-      const rawSources = (rawData as any)?.sources;
-      const sources: string[] = Array.isArray(consumerSources)
-        ? Array.from(consumerSources)
-        : Array.isArray(rawSources)
-          ? rawSources.slice()
-          : [];
-
+      const sources: string[] = Array.isArray(consumerSources) ? Array.from(consumerSources) : [];
       const { ignoreListedSources, hasIgnoreList } = buildIgnoreList(rawData, sources);
 
-      this.maps.push({
-        scriptUrl,
-        scriptId,
-        consumer,
-        sources,
-        ignoreListedSources,
-        hasIgnoreList,
-      });
+      // A reload re-parses the same bundle URL under a new scriptId, and the old
+      // script can no longer produce frames. Keeping its map would retain a second
+      // fully parsed copy of the bundle's mappings for nothing, so it is replaced.
+      this.maps = this.maps.filter((m) => m.scriptUrl !== scriptUrl);
+      this.maps.push({ scriptUrl, scriptId, consumer, ignoreListedSources, hasIgnoreList });
       if (this.maps.length > MAX_REGISTERED_MAPS) {
         this.maps.splice(0, this.maps.length - MAX_REGISTERED_MAPS);
       }
     } catch {
-      // Failed to fetch or parse source map — silently skip
+      // unusable source map — skip
     }
   }
 }
