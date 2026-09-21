@@ -2509,6 +2509,39 @@ describe("argent flow run <dir>", () => {
     );
   });
 
+  it("re-runs with the batch's --env values, quoting the ones a shell would expand", async () => {
+    toolsClientMock.callTool
+      .mockResolvedValueOnce({ data: report({ flow: "a-login", ok: false, steps: [] }) })
+      .mockResolvedValueOnce({ data: report({ flow: "b-checkout" }) });
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(tempRoot);
+      await expect(
+        flow(
+          [
+            "run",
+            "./flows",
+            "--env",
+            "BUILD=1421",
+            "--env",
+            "LABEL=Test account",
+            "--env",
+            "API_KEY={{secret:API_KEY}}",
+          ],
+          opts
+        )
+      ).rejects.toThrow("process.exit:1");
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const rerun = `argent flow run ${path.join("flows", "a-login.yaml")} --env BUILD=1421 --env 'LABEL=Test account' --env 'API_KEY={{secret:API_KEY}}'`;
+    expect(logs.join("\n").split("\n")).toContain(`    re-run: ${rerun}`);
+    expect(parseRunArgs(["flows/a-login.yaml", "--env", "LABEL=Test account"]).env).toEqual({
+      LABEL: "Test account",
+    });
+  });
+
   it("re-runs with an --output that starts with a dash through ./, not as an option", async () => {
     toolsClientMock.callTool.mockResolvedValueOnce({
       data: report({ flow: "a-login", ok: false, steps: [] }),

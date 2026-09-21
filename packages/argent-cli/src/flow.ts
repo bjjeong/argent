@@ -524,9 +524,9 @@ function shellQuoteArg(arg: string): string {
 
 /**
  * The command that runs one flow of a directory run alone, from the same
- * working directory, with the same --device, --platform and --update-baselines,
- * and an --output that exports to the directory the batch exported that flow
- * to. A flow outside that directory keeps its absolute path, since `run`
+ * working directory, with the same --device, --platform, --update-baselines and
+ * --env, and an --output that exports to the directory the batch exported that
+ * flow to. A flow outside that directory keeps its absolute path, since `run`
  * refuses ".." segments, and a path with a leading "-" gets "./" so the parser
  * does not read it as an option.
  */
@@ -534,7 +534,10 @@ function rerunCommand(
   flowPath: string,
   rel: string,
   projectRoot: string,
-  args: Pick<ReturnType<typeof parseRunArgs>, "device" | "platform" | "output" | "updateBaselines">
+  args: Pick<
+    ReturnType<typeof parseRunArgs>,
+    "device" | "platform" | "output" | "updateBaselines" | "env"
+  >
 ): string {
   const pathArg = (p: string) => shellQuoteArg(p.startsWith("-") ? `.${path.sep}${p}` : p);
   const fromCwd = path.relative(projectRoot, flowPath);
@@ -545,6 +548,9 @@ function rerunCommand(
   if (args.platform) parts.push("--platform", shellQuoteArg(args.platform));
   if (args.updateBaselines) parts.push("--update-baselines");
   if (args.output) parts.push("--output", pathArg(path.join(args.output, path.dirname(rel))));
+  for (const [name, value] of Object.entries(args.env ?? {})) {
+    parts.push("--env", shellQuoteArg(`${name}=${value}`));
+  }
   return parts.join(" ");
 }
 
