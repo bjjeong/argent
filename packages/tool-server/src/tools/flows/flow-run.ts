@@ -2369,15 +2369,21 @@ const INDETERMINATE_HINT =
   "before you edit the flow";
 
 function outcomeDetails(
-  r: Pick<DirectiveOutcome, "indeterminate" | "hint" | "expected" | "actual" | "expectedKind">
+  r: Pick<
+    DirectiveOutcome,
+    "indeterminate" | "refused" | "hint" | "expected" | "actual" | "expectedKind"
+  >
 ): Pick<StepReport, "hint" | "expected" | "actual" | "expectedKind" | "indeterminate"> {
-  const hint = r.hint ?? (r.indeterminate ? INDETERMINATE_HINT : undefined);
+  // A refused read gets neither the flag nor the re-run hint: a re-run gets the
+  // same refusal, and its reason already says what to change.
+  const indeterminate = r.indeterminate === true && r.refused !== true;
+  const hint = r.hint ?? (indeterminate ? INDETERMINATE_HINT : undefined);
   return {
     ...(hint !== undefined && { hint }),
     ...(r.expected !== undefined && { expected: r.expected }),
     ...(r.expectedKind !== undefined && { expectedKind: r.expectedKind }),
     ...(r.actual !== undefined && { actual: r.actual }),
-    ...(r.indeterminate && { indeterminate: true as const }),
+    ...(indeterminate && { indeterminate: true as const }),
   };
 }
 

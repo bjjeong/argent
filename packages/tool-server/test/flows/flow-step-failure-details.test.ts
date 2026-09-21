@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { FAILURE_CODES, FailureError } from "@argent/registry";
 import type { DescribeNode, DescribeTreeData } from "../../src/tools/describe/contract";
 
 let currentTree: () => DescribeNode;
@@ -276,6 +277,49 @@ describe("unreadable tree", () => {
       hint: INDETERMINATE_HINT,
     });
     expect(blanked.reason).toMatch(/empty or degraded/);
+  });
+});
+
+describe("refused tree read", () => {
+  // A read refused with a `validation` failure is refused again on every re-run
+  // (here: the flow reads an Apple system app). The check did not run, but the
+  // step must not be flagged, or told, to run again.
+  function refused(): never {
+    throw new FailureError("com.apple.Preferences is an Apple system app", {
+      error_code: FAILURE_CODES.NATIVE_DEVTOOLS_NOT_INJECTABLE,
+      failure_stage: "flow_tree_pinned_target",
+      failure_area: "tool_server",
+      error_kind: "validation",
+    });
+  }
+
+  it("does not flag an assert or a when guard for a re-run", async () => {
+    currentTree = refused;
+    await writeFlow("refused-assert", {
+      executionPrerequisite: "",
+      steps: [{ kind: "assert", condition: "visible", selector: { text: "General" } }],
+    });
+    await writeFlow("refused-guard", {
+      executionPrerequisite: "",
+      steps: [
+        {
+          kind: "when",
+          condition: { kind: "ui", condition: "visible", selector: { text: "General" } },
+          steps: [{ kind: "tap", selector: { text: "General" } }],
+        },
+      ],
+    });
+
+    const [assertRun, guardRun] = await Promise.all([run("refused-assert"), run("refused-guard")]);
+
+    expect(assertRun.steps[0]).toMatchObject({ status: "fail" });
+    expect(assertRun.steps[0].reason).toContain("is an Apple system app");
+    // The guard still errors: its block is never skipped on a read it could not do.
+    expect(guardRun.steps.map((s) => `${s.kind}:${s.status}`)).toEqual(["when:error", "tap:skip"]);
+    for (const step of [assertRun.steps[0], guardRun.steps[0]]) {
+      expect(step).not.toHaveProperty("indeterminate");
+      expect(step).not.toHaveProperty("hint");
+    }
   });
 });
 
