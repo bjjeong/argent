@@ -916,9 +916,9 @@ export function selectorMiss({
   if (blind) {
     return {
       indeterminate: true,
-      reason:
-        `the UI tree read back empty and degraded, so ${sel} was never looked for — this is the ` +
-        `reader reporting it could not see the app, not the app rendering nothing`,
+      // No claim about the app: a physical iPhone's reader flags every childless
+      // tree, so an app that rendered nothing reads the same here.
+      reason: `the UI tree read back empty and degraded, so ${sel} was never looked for`,
       ...(blind.hint !== undefined && { hint: blind.hint }),
     };
   }
@@ -2201,8 +2201,7 @@ async function waitForIdle(
     indeterminate: true,
     reason:
       `the UI tree read back empty and degraded while waiting for the screen to settle, so the ` +
-      `screen was never observed — this is the reader reporting it could not see the app, not ` +
-      `the app rendering nothing`,
+      `screen was never observed`,
     hint: blindHint,
   });
 

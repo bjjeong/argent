@@ -124,13 +124,14 @@ describe("selector misses on a screen that was never read", () => {
 
     expect(step).toMatchObject({ status: "fail", indeterminate: true, hint: VEGA_HINT });
     expect(step.reason).toBe(
-      'the UI tree read back empty and degraded, so text="Home" was never looked for — this is ' +
-        "the reader reporting it could not see the app, not the app rendering nothing"
+      'the UI tree read back empty and degraded, so text="Home" was never looked for'
     );
     expect(step.reason).not.toContain("no element matched");
   }, 20_000);
 
   it("falls back to the shared re-run hint when the reader gave none", async () => {
+    // The reason must not call the app innocent: the shared hint names a
+    // screen the app emptied itself as one cause.
     currentTree = () => screen([]);
     currentFlags = { should_restart: true };
     await writeFlow("blind-type", {
@@ -141,6 +142,7 @@ describe("selector misses on a screen that was never read", () => {
     const [step] = (await run("blind-type")).steps;
 
     expect(step).toMatchObject({ status: "fail", indeterminate: true, hint: INDETERMINATE_HINT });
+    expect(step.reason).not.toMatch(/not the app rendering nothing/);
   }, 20_000);
 
   it("gives an assert, an await and a when guard the reader's repair too", async () => {
