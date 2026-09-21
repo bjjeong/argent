@@ -65,8 +65,13 @@ function firstFailingStep(steps: unknown): ({ label: string } & NestedDetails) |
     const what = str(entry.tool) ?? str(entry.kind) ?? "step";
     const why = str(entry.reason) ?? "no reason given";
     const hint = str(entry.hint);
-    const expected = str(entry.expected);
-    const actual = str(entry.actual);
+    // A snapshot's values are a tolerance and a measured diff, or two image
+    // sizes. The renderers print them unquoted only on a `snapshot` step, so
+    // on this `tool` step they would read as quoted device text. The label
+    // below already holds both values, in the inner reason.
+    const snapshot = entry.kind === "snapshot";
+    const expected = snapshot ? undefined : str(entry.expected);
+    const actual = snapshot ? undefined : str(entry.actual);
     return {
       label: `${what}: ${why}`,
       ...(hint !== undefined && { hint }),

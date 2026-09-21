@@ -177,6 +177,30 @@ describe("a nested flow-execute reports its own verdict", () => {
     expect(result.steps[0].actual).toBe("Taps: 42");
   });
 
+  it("keeps an inner snapshot's values in the label, not in quoted expected and actual", async () => {
+    // A snapshot's values print unquoted only on a `snapshot` step. On the outer
+    // `tool` step they would print as quoted device text, "≤ 0.5%".
+    const { result } = await run("flow-execute", {
+      ...FAILED_SUBFLOW,
+      steps: [
+        {
+          index: 0,
+          kind: "snapshot",
+          status: "fail",
+          reason: "diff 0.70% > 0.5% (cv__chromium-1280x713.png)",
+          expected: "≤ 0.5%",
+          actual: "0.70%",
+          hint: "the element's size drifted; crop a fixed-size container",
+        },
+      ],
+    });
+
+    expect(result.steps[0].reason).toContain("(snapshot: diff 0.70% > 0.5%");
+    expect(result.steps[0].expected).toBeUndefined();
+    expect(result.steps[0].actual).toBeUndefined();
+    expect(result.steps[0].hint).toBe("the element's size drifted; crop a fixed-size container");
+  });
+
   it("carries no detail fields when the failed inner step has none", async () => {
     const { result } = await run("flow-execute", FAILED_SUBFLOW);
 
