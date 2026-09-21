@@ -7,6 +7,12 @@ import type { Registry, ToolCapability, ToolDefinition } from "@argent/registry"
 import { simulatorServerRef, type SimulatorServerApi } from "../../blueprints/simulator-server";
 import { chromiumCdpRef, type ChromiumCdpApi } from "../../blueprints/chromium-cdp";
 import { isIosPhysicalDevice, resolveDevice } from "../../utils/device-info";
+import {
+  RESULT_NOTE_KEY,
+  requestedGeometry,
+  chromiumDropNote,
+  unsupportedDropNote,
+} from "./dropped-geometry";
 import { getScreenshotScale } from "../../utils/simulator-client";
 import { captureScreenshotUpright } from "../../utils/rotation-aware-capture";
 import { androidDevtoolsRotationPeek } from "../../utils/android-devtools-rotation-peek";
@@ -62,9 +68,17 @@ type Params = z.infer<typeof zodSchema>;
 
 interface Result {
   /**
-   * Captured PNG as an artifact handle: the MCP client materializes it locally
-   * rather than fetching the simulator server's `127.0.0.1` media URL, which is
-   * unreachable when the tool-server is remote.
+   * Set only when the caller asked for geometry the backend could not apply.
+   * `http.ts` hoists this reserved key into the response envelope's `note`,
+   * which every client already renders — the result body itself is discarded
+   * for image-output tools.
+   */
+  [RESULT_NOTE_KEY]?: string;
+  /**
+   * The captured PNG as an artifact handle. The MCP client materializes it to
+   * a local file and renders it inline — no second fetch of the simulator
+   * server's `127.0.0.1` media URL, which is unreachable when the tool-server
+   * is remote.
    */
   image: ArtifactHandle;
 }
@@ -204,17 +218,22 @@ Fails if the simulator-server / emulator backend / Chromium CDP is not reachable
       if (device.platform === "chromium") {
         const ref = chromiumCdpRef(device);
         const chromium = (await registry.resolveService(ref.urn, ref.options)) as ChromiumCdpApi;
-        const { path: capturedPath } = await chromium.captureScreenshot({
+        const captured = await chromium.captureScreenshot({
           rotation: params.rotation,
           scale: params.scale,
           downscaler: params.downscaler,
         });
         const image = await requireArtifacts(ctx).register({
-          hostPath: capturedPath,
+          hostPath: captured.path,
           kind: "screenshot",
           mimeType: "image/png",
         });
-        return { image };
+        // Only report what the caller asked for AND the backend dropped: a
+        // visual snapshot passes scale 1, which is a no-op, not a loss.
+        const requested = requestedGeometry(params);
+        const dropped = (captured.droppedFeatures ?? []).filter((f) => requested.includes(f));
+        const note = chromiumDropNote(dropped, captured.dropReason);
+        return { image, ...(note ? { [RESULT_NOTE_KEY]: note } : {}) };
       }
 
       // Physical devices use the runner. Probe tvOS only after this. simctl does not list hardware UDIDs.
@@ -225,7 +244,12 @@ Fails if the simulator-server / emulator backend / Chromium CDP is not reachable
           kind: "screenshot",
           mimeType: "image/png",
         });
-        return { image };
+        // The runner capture is downscaled but never rotated.
+        const note = unsupportedDropNote(
+          requestedGeometry(params).filter((f) => f === "rotation"),
+          "physical iPhone"
+        );
+        return { image, ...(note ? { [RESULT_NOTE_KEY]: note } : {}) };
       }
 
       // Shape alone can't tell tvOS from iOS, and tvOS has no simulator-server
@@ -237,7 +261,13 @@ Fails if the simulator-server / emulator backend / Chromium CDP is not reachable
           kind: "screenshot",
           mimeType: "image/png",
         });
-        return { image };
+        // tvScreenshot has no rotation step at all, so an explicit rotation is
+        // dropped before any capture happens.
+        const note = unsupportedDropNote(
+          requestedGeometry(params).filter((f) => f === "rotation"),
+          "Apple TV"
+        );
+        return { image, ...(note ? { [RESULT_NOTE_KEY]: note } : {}) };
       }
 
       // Vega captures host-side via the Android emulator console (`adb emu`);
@@ -249,7 +279,11 @@ Fails if the simulator-server / emulator backend / Chromium CDP is not reachable
           kind: "screenshot",
           mimeType: "image/png",
         });
-        return { image };
+        const note = unsupportedDropNote(
+          requestedGeometry(params).filter((f) => f === "rotation"),
+          "Vega (Fire TV)"
+        );
+        return { image, ...(note ? { [RESULT_NOTE_KEY]: note } : {}) };
       }
 
       const ref = simulatorServerRef(device);
