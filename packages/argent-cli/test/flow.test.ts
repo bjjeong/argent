@@ -468,6 +468,9 @@ describe("argent flow run", () => {
       "",
       '  ✗ step 1 assert text "Total"',
       "    text did not match",
+      '    expected: "$12.00"',
+      '    actual:   "$10.00"',
+      "    hint: the cart may still be loading",
       "",
       "FAIL (started on SIM-1) — 0 passed, 1 failed, 0 errored, 1 skipped",
     ]);

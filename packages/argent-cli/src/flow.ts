@@ -294,6 +294,10 @@ function escapeControls(v: string): string {
  * line and keeps a raw escape sequence out of the terminal.
  */
 export function renderStepDetailLines(s: StepReport, n: number): string[] {
+  return stepDetailTexts(s).map((text) => renderUnderStepLine(s, n, text));
+}
+
+function stepDetailTexts(s: StepReport): string[] {
   // A `hint:` and a snapshot value print unquoted, so their own quotes stay as
   // they were written; a quoted value escapes its quotes with the rest.
   const oneLine = (v: string): string => JSON.stringify(v).slice(1, -1).replace(/\\"/g, '"');
@@ -304,13 +308,9 @@ export function renderStepDetailLines(s: StepReport, n: number): string[] {
   const expected = (v: string): string =>
     s.expectedKind === "pattern" ? `/${escapeControls(v)}/` : value(v);
   const lines: string[] = [];
-  if (typeof s.expected === "string") {
-    lines.push(renderUnderStepLine(s, n, `expected: ${expected(s.expected)}`));
-  }
-  if (typeof s.actual === "string") {
-    lines.push(renderUnderStepLine(s, n, `actual:   ${value(s.actual)}`));
-  }
-  if (typeof s.hint === "string") lines.push(renderUnderStepLine(s, n, `hint: ${oneLine(s.hint)}`));
+  if (typeof s.expected === "string") lines.push(`expected: ${expected(s.expected)}`);
+  if (typeof s.actual === "string") lines.push(`actual:   ${value(s.actual)}`);
+  if (typeof s.hint === "string") lines.push(`hint: ${oneLine(s.hint)}`);
   return lines;
 }
 
@@ -440,6 +440,9 @@ interface FailedFlow {
  * numbers it so the recap, the per-flow block, and a single rerun agree. The
  * reason is wire data, so it is stringified the way renderStepLine's template
  * does rather than trusted to be a string.
+ *
+ * The reason says only what failed: the text the step found and the advice
+ * are in its expected, actual and hint lines, so the recap carries those too.
  */
 export function summarizeFailure(report: FlowReport): Pick<FailedFlow, "headline" | "detail"> {
   let n = 0;
@@ -447,7 +450,8 @@ export function summarizeFailure(report: FlowReport): Pick<FailedFlow, "headline
     if (s.kind === "echo") continue;
     n++;
     if (s.status === "fail" || s.status === "error") {
-      const detail = s.reason ? String(s.reason) : undefined;
+      const lines = [...(s.reason ? [String(s.reason)] : []), ...stepDetailTexts(s)];
+      const detail = lines.length > 0 ? lines.join("\n") : undefined;
       return { headline: `step ${n} ${stepLabel(s, report.flow)}`, detail };
     }
   }
