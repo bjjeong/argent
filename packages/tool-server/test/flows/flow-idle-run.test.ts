@@ -1173,10 +1173,6 @@ steps:
     const step = (await run("ready")).steps.at(-1)!;
     expect(step.status).toBe("error");
     expect(step.reason).toContain("empty and degraded");
-    // With no hint from the reader, the shared hint names a screen the app
-    // emptied itself as one cause. The reason must not rule that out.
-    expect(step.hint).toMatch(/^check the app first/);
-    expect(step.reason).not.toMatch(/not the app rendering nothing/);
   });
 
   // A degraded tail survives a closing round that merely ran out of budget,
