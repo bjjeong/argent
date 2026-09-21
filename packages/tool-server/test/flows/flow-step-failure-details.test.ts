@@ -3,13 +3,15 @@ import { FAILURE_CODES, FailureError } from "@argent/registry";
 import type { DescribeNode, DescribeTreeData } from "../../src/tools/describe/contract";
 
 let currentTree: () => DescribeNode;
-/** The reader's own flags, set by the blind-read tests (Vega's shape). */
+/** The reader's own flags, set by the blind-read tests. */
 let currentFlags: Pick<DescribeTreeData, "hint" | "should_restart"> = {};
+/** The tree source. A blind-read test sets the one that really sends its flags. */
+let currentSource: DescribeTreeData["source"] = "native-devtools";
 vi.mock("../../src/tools/flows/flow-tree", () => ({
   fetchFlowTree: vi.fn(
     async (): Promise<DescribeTreeData> => ({
       tree: currentTree(),
-      source: "native-devtools",
+      source: currentSource,
       ...currentFlags,
     })
   ),
@@ -23,10 +25,14 @@ const { run, writeFlow } = createFlowTestHarness({
   reset: () => {
     currentTree = () => screen([]);
     currentFlags = {};
+    currentSource = "native-devtools";
   },
 });
 
 const DETAIL_KEYS = ["hint", "expected", "actual", "expectedKind", "indeterminate"] as const;
+
+/** A Vega device for the tests that resolve a cropOn frame directly. */
+const VEGA = { registry: {}, device: { id: "vega-vvd", platform: "vega" } } as ActionEnv;
 
 const INDETERMINATE_HINT =
   "check the app first — a crash, or a screen the app emptied itself, reads the same here as a " +
@@ -85,13 +91,13 @@ describe("zero-area selector misses on Vega", () => {
   it("does not suggest a scroll-to step, which Vega refuses", async () => {
     // Vega's tree keeps an off-screen node at zero area, so a cropOn that
     // finds only such a node reaches the zero-area hint.
+    currentSource = "vega-automation";
     currentTree = () =>
       screen([
         label("Price", { identifier: "price", frame: { x: 0, y: 1.2, width: 0, height: 0 } }),
       ]);
-    const env = { registry: {}, device: { id: "vega-vvd", platform: "vega" } } as ActionEnv;
 
-    const miss = await waitForFrame(env, { identifier: "price" });
+    const miss = await waitForFrame(VEGA, { identifier: "price" });
 
     if (miss === "aborted" || !("unresolved" in miss)) throw new Error("expected a miss");
     expect(selectorMiss(miss)).toEqual({
@@ -104,46 +110,45 @@ describe("zero-area selector misses on Vega", () => {
 });
 
 describe("selector misses on a screen that was never read", () => {
-  // The reader answered with an empty tree AND its own "I could not see the app"
-  // flags — an unattached Vega toolkit, or an AX service asking for a relaunch.
+  // The reader answered with an empty tree AND its own flags. In a flow only
+  // Vega's toolkit reader does this: the other flow sources send no flags, and
+  // a physical iPhone's source throws on this shape. Vega refuses a tap before
+  // it reads a tree, so a snapshot's cropOn is where a flow meets this read.
   // "no element matched" is a claim about what the screen holds, and this read
   // supports no such claim.
   const VEGA_HINT =
     "No UI tree from the Vega automation toolkit. The toolkit attaches at app launch — " +
     "relaunch the foreground app.";
-
-  it("refuses a verdict and gives the reader's repair, not the scroll-to advice", async () => {
+  it("refuses a verdict on a Vega cropOn and gives the toolkit's repair, not the scroll-to advice", async () => {
+    currentSource = "vega-automation";
     currentTree = () => screen([]);
     currentFlags = { hint: VEGA_HINT };
-    await writeFlow("blind-tap", {
-      executionPrerequisite: "",
-      steps: [{ kind: "tap", selector: { text: "Home" } }],
+
+    const miss = await waitForFrame(VEGA, { text: "Home" });
+
+    if (miss === "aborted" || !("unresolved" in miss)) throw new Error("expected a miss");
+    expect(selectorMiss(miss)).toEqual({
+      indeterminate: true,
+      reason:
+        'the UI tree read back empty and degraded, so text="Home" was never looked for — this ' +
+        "is the reader reporting it could not see the app, not the app rendering nothing",
+      hint: VEGA_HINT,
     });
-
-    const [step] = (await run("blind-tap")).steps;
-
-    expect(step).toMatchObject({ status: "fail", indeterminate: true, hint: VEGA_HINT });
-    expect(step.reason).toBe(
-      'the UI tree read back empty and degraded, so text="Home" was never looked for — this is ' +
-        "the reader reporting it could not see the app, not the app rendering nothing"
-    );
-    expect(step.reason).not.toContain("no element matched");
   }, 20_000);
 
-  it("falls back to the shared re-run hint when the reader gave none", async () => {
-    currentTree = () => screen([]);
-    currentFlags = { should_restart: true };
-    await writeFlow("blind-type", {
-      executionPrerequisite: "",
-      steps: [{ kind: "type", into: { identifier: "search" }, text: "socks" }],
+  it("leaves the hint to the runner when the reader gave none", () => {
+    // No flow tree source sends flags without a hint today. The runner would
+    // add its shared hint to this outcome.
+    expect(selectorMiss({ unresolved: { text: "Home" }, matched: 0, blind: {} })).toEqual({
+      indeterminate: true,
+      reason:
+        'the UI tree read back empty and degraded, so text="Home" was never looked for — this ' +
+        "is the reader reporting it could not see the app, not the app rendering nothing",
     });
-
-    const [step] = (await run("blind-type")).steps;
-
-    expect(step).toMatchObject({ status: "fail", indeterminate: true, hint: INDETERMINATE_HINT });
-  }, 20_000);
+  });
 
   it("gives an assert, an await and a when guard the reader's repair too", async () => {
+    currentSource = "vega-automation";
     currentTree = () => screen([]);
     currentFlags = { hint: VEGA_HINT };
     await writeFlow("blind-assert", {
@@ -180,15 +185,15 @@ describe("selector misses on a screen that was never read", () => {
   it("judges a Vega cropOn miss on the rounds that looked, when only the last reads are blind", async () => {
     // Earlier rounds read the screen and did not find the element; then the
     // toolkit went blind. "was never looked for" would be false.
+    currentSource = "vega-automation";
     const blindFrom = Date.now() + 3000;
     currentTree = () => {
       const blind = Date.now() >= blindFrom;
       currentFlags = blind ? { hint: VEGA_HINT } : {};
       return blind ? screen([]) : screen([label("Home")]);
     };
-    const env = { registry: {}, device: { id: "vega-vvd", platform: "vega" } } as ActionEnv;
 
-    const miss = await waitForFrame(env, { identifier: "price-card" });
+    const miss = await waitForFrame(VEGA, { identifier: "price-card" });
 
     if (miss === "aborted" || !("unresolved" in miss)) throw new Error("expected a miss");
     expect(Date.now()).toBeGreaterThan(blindFrom);
@@ -249,6 +254,42 @@ describe("text check failures", () => {
     expect(step.hint).toBe(
       'the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text'
     );
+  });
+
+  it("caps a long own text in the hint at 300 characters", async () => {
+    const own = "Total ".repeat(80);
+    currentTree = () => screen([label(own, { identifier: "total", subtreeText: `${own} $41.50` })]);
+    await writeFlow("own-text-long", { executionPrerequisite: "", steps: [assertTotalEquals42] });
+
+    const [step] = (await run("own-text-long")).steps;
+
+    expect(step.hint).toBe(
+      `the element's own text is "${own.slice(0, 300)}…"; the check accepts the subtree text or the own text`
+    );
+  });
+
+  it("keeps the own-text hint when the final poll fails, and closes the reason with the note", async () => {
+    // Trusted reads until about one poll before the 1s assert deadline, then
+    // the source throws: the blip tier, whose verdict stands.
+    let firstReadAt: number | undefined;
+    currentTree = () => {
+      firstReadAt ??= Date.now();
+      if (Date.now() - firstReadAt >= 950) disconnected();
+      return screen([label("$41.50", { identifier: "total", subtreeText: "Total $41.50" })]);
+    };
+    await writeFlow("own-text-blip", { executionPrerequisite: "", steps: [assertTotalEquals42] });
+
+    const [step] = (await run("own-text-blip")).steps;
+
+    expect(step).toMatchObject({
+      status: "fail",
+      reason:
+        'element matched id="total" but its text did not equal "$42.00" (the final poll ' +
+        "could not read the UI tree: native devtools disconnected)",
+      actual: "Total $41.50",
+      hint: `the element's own text is "$41.50"; the check accepts the subtree text or the own text`,
+    });
+    expect(step).not.toHaveProperty("indeterminate");
   });
 
   it("caps a long actual text at 300 characters and keeps it out of the reason", async () => {
