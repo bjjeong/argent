@@ -276,7 +276,7 @@ async function startCaptureLocked(
   const ffmpeg = await resolveFfmpeg();
   if (!ffmpeg) {
     throw new FailureError(
-      "`ffmpeg` was not found on PATH. Install it (e.g. `brew install ffmpeg`) to record the screen.",
+      "`ffmpeg` was not found on PATH. Install a build with libx264 (`brew install ffmpeg` on macOS, `apt install ffmpeg` on Debian/Ubuntu) and retry.",
       {
         error_code: FAILURE_CODES.SCREEN_RECORDING_FFMPEG_NOT_FOUND,
         failure_stage: "screen_recording_resolve_ffmpeg",

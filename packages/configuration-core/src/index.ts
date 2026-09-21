@@ -88,6 +88,7 @@ export {
   setRememberedAgent,
   clearRememberedAgent,
   getAdditionalIosDeviceSets,
+  getAndroidSdkRoot,
   UnknownConfigKeyError,
   ConfigScopeError,
   ConfigValidationError,
