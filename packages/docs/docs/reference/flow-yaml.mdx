@@ -354,14 +354,14 @@ The file name without `.yaml` names the report and the artifacts. It contains on
 
 Each step line shows the time of the step before the reason, for example `(1.2s)`. A step that did not run shows no time. The time of a `when` or `run` step does not include the steps in its block or fragment. The last line of a flow run shows the time of the run. The summary of a directory run shows the time of all flows, for example `(1m 32s)`.
 
-The reason of a step that did not pass states what failed. Under that step, Argent prints each of these lines that applies to the failure:
+The reason of a step that did not pass states what failed. Under that step, Argent prints each of these lines that applies to the failure. The CLI and the result of the `flow-execute` tool show the same lines:
 
 | Line             | Content                                                                         |
 | ---------------- | ------------------------------------------------------------------------------- |
 | `expected:`      | The value that the check wanted: a text, a snapshot tolerance or an image size  |
 | `actual:`        | The value that the check found. Argent shows the first 300 characters of a text |
 | `indeterminate:` | The check did not run, because Argent could not read the UI tree                |
-| `hint:`          | The first thing to try                                                          |
+| `hint:`          | A thing to try first, or a fact that helps you find the cause                   |
 
 ```
   ✗  3 assert id=total equals "$42.00" (1.0s) — element matched id="total" but its text did not equal "$42.00"
@@ -369,9 +369,15 @@ The reason of a step that did not pass states what failed. Under that step, Arge
        actual:   "Total $41.50"
 ```
 
-Argent prints each value on one line. A control character in a value becomes an escape, for example `\n` for a line break. Thus a value that differs only by a line break or a tab looks different from the other value.
+Argent prints each value on one line. An invisible character in a value becomes an escape, for example `\n` for a line break or `\u00a0` for a no-break space. These characters are invisible:
 
-Argent prints a text value in quotation marks. Argent prints a regular expression between slashes, as on the step line. Thus you can copy the pattern back into `matches:`.
+- Control characters, for example a line break or a tab.
+- Format characters, for example a zero-width space.
+- Each space character other than the usual space.
+
+Thus a value that differs only by an invisible character looks different from the other value.
+
+Argent prints a text value in quotation marks, with the escapes of JSON: `\"` for a quotation mark and `\\` for a backslash. A `hint:` line shows a text from the device in the same format. Argent prints a regular expression between slashes, as on the step line. The text between the slashes is the value of `matches:`.
 
 ```
   ✗  4 assert id=count matches /^Taps: \d\d\d$/ (1.0s) — element matched id="count" but its text did not match /^Taps: \d\d\d$/
@@ -426,7 +432,16 @@ When a single flow run fails its steps, Argent prints the first step that failed
 
 A directory run with `--json` writes one document. The document holds `ok`, `total`, `passed`, `failed`, `skipped`, `durationMs` and a `flows` array. `durationMs` is the time of the directory run in milliseconds. The array holds one entry for each flow. Each entry holds the `path` and the `status`. An entry holds `report` when the flow produced one, whether it passed or failed its steps. An entry holds `error` instead when the tool call produced no report — a rejected run, a run error, or a reply that is not a report. Such an entry also holds `error_code` and `error_kind` when the tool-server sends them. An entry with the status `skip` holds neither, because Argent made no call for that flow. `--json-stream` puts the same two fields on its `error` record.
 
-A single flow run with `--json` writes the report of that flow. The report holds `startedAt`, the start of the run in epoch milliseconds, and `durationMs`, the time of the run in milliseconds. Each step that ran holds its own `durationMs`. A step that did not pass can also hold `hint`, `expected` and `actual`, with the content of the lines above. A step whose `expected` holds a regular expression also holds `expectedKind: "pattern"`. The `expected` field of such a step holds the source of the pattern, without the slashes. A step holds `indeterminate: true` when Argent could not read the UI tree to do the check. Argent did not do the check on such a step. These steps can hold the flag: `await`, `assert`, `idle`, a `when` guard, and a step that must find an element — `tap`, `long-press`, `type`, `swipe`, `pinch`, `rotate`, or a `snapshot` with `cropOn`. The app can be the cause: a crash, or a screen that the app made empty. The device or the tree source can also be the cause. Look at the app first. Then run the flow again before you change it. A `tool: flow-execute` step copies these fields from the first step that failed in the composed flow. Each `progress` record of `--json-stream` holds one step, with the same `durationMs`. When the run gets no report, Argent puts the reason on stderr instead. Use `--json-stream` to get the failure as a record.
+A single flow run with `--json` writes the report of that flow. The report holds `startedAt`, the start of the run in epoch milliseconds, and `durationMs`, the time of the run in milliseconds. Each step that ran holds its own `durationMs`. A step that did not pass can also hold `hint`, `expected` and `actual`, with the content of the lines above. A step whose `expected` holds a regular expression also holds `expectedKind: "pattern"`. The `expected` field of such a step holds the source of the pattern, without the slashes. A step holds `indeterminate: true`, shown as the `indeterminate:` line, when the step did not do its check because Argent could not read the UI tree. A `tool: flow-execute` step copies these fields from the first step that failed in the composed flow. Each `progress` record of `--json-stream` holds one step, with the same `durationMs`. When the run gets no report, Argent puts the reason on stderr instead. Use `--json-stream` to get the failure as a record.
+
+These steps can hold `indeterminate: true`:
+
+- `await`, `assert`, `idle` and a `when` guard. Each read of the UI tree failed or was empty, or the reads stopped at the end of the wait.
+- A step that must find an element: `tap`, `long-press`, `type`, `swipe`, `pinch`, `rotate`, or a `snapshot` with `cropOn`. Each read of the UI tree was empty, and the tree source marked the read as bad. This occurs only on Vega, when the automation toolkit is not attached. When the tree source fails with an error, such a step gets the status `error` and no flag.
+
+For a step with the flag, the app can be the cause: a crash, or a screen that the app made empty. The device or the tree source can also be the cause. Look at the app first. Then run the flow again before you change it.
+
+A step gets no flag when Argent refuses to read the UI tree, for example for an Apple system app. A new run gets the same refusal. Change the flow as the reason tells you.
 
 Pin `--platform` and `--device` on iOS, Android and Vega. On Chromium, pass `--platform chromium` and omit `--device`. Then the runner boots the declared app path with a reproducible window size.
 

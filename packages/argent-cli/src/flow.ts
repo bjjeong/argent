@@ -133,8 +133,8 @@ a running instance.
 
 A directory run prints only the steps that need attention (each failure, each
 warning, and each script step's output), then its outcome. After the last flow
-it lists every failed flow with its reason and a command that re-runs that flow
-alone, then a final flow summary; --recursive walks subdirectories too
+it lists every failed flow with its reason, its expected/actual/indeterminate/hint
+lines, and a command that re-runs that flow alone, then a final flow summary; --recursive walks subdirectories too
 (dot-directories and node_modules are skipped). A flow that fails its steps
 keeps the batch running, as does one the server rejects up front — an invalid
 file, or a device it cannot resolve. A transport failure, a rejection the server
