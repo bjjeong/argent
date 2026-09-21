@@ -439,10 +439,14 @@ const PROBE_BUDGET_MS = PROBE_ASSERT_GRACE_MS + 2 * PROBE_MAX_TREE_READ_MS;
  * quotes the matched element's text, and the flow tree hoists text from every
  * descendant, so one failed `text` check can carry a whole card.
  *
+ * 200 characters for the verdict and the text it found, plus 70 for the fixed
+ * wording of the own-text hint that {@link probeVerdict} adds. Without them, a
+ * short found text that fit the one-sentence verdict is cut out of the middle.
+ *
  * An indeterminate reason is quoted whole: it is an environment error, it
  * carries no screen content, and its tail is the recovery instruction.
  */
-const MAX_PROBE_REASON_CHARS = 200;
+const MAX_PROBE_REASON_CHARS = 270;
 
 /**
  * How much of the cap goes to the END. {@link probeVerdict} closes a verdict
