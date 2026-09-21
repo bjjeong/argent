@@ -81,6 +81,28 @@ describe("tap-family selector misses", () => {
   }, 15_000);
 });
 
+describe("zero-area selector misses on Vega", () => {
+  it("does not suggest a scroll-to step, which Vega refuses", async () => {
+    // Vega's tree keeps an off-screen node at zero area, so a cropOn that
+    // finds only such a node reaches the zero-area hint.
+    currentTree = () =>
+      screen([
+        label("Price", { identifier: "price", frame: { x: 0, y: 1.2, width: 0, height: 0 } }),
+      ]);
+    const env = { registry: {}, device: { id: "vega-vvd", platform: "vega" } } as ActionEnv;
+
+    const miss = await waitForFrame(env, { identifier: "price" });
+
+    if (miss === "aborted" || !("unresolved" in miss)) throw new Error("expected a miss");
+    expect(selectorMiss(miss)).toEqual({
+      reason: '1 element matched id="price" but none was visible (zero-area frame)',
+      hint:
+        "the element is in the tree but has no on-screen area; it may be off-screen, " +
+        "collapsed, or not laid out yet",
+    });
+  }, 20_000);
+});
+
 describe("selector misses on a screen that was never read", () => {
   // The reader answered with an empty tree AND its own "I could not see the app"
   // flags — an unattached Vega toolkit, or an AX service asking for a relaunch.

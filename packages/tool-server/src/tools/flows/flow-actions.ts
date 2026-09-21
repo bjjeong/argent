@@ -610,6 +610,7 @@ async function waitForFrames(
         unresolved,
         matched: lastTree ? flowFindAll(lastTree, unresolved).length : 0,
         ...(lastTree === undefined && blind !== undefined && { blind: { hint: blind.hint } }),
+        ...(env.device.platform === "vega" && { noScrollTo: true as const }),
       };
     }
     const sleepMs = Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()));
@@ -631,6 +632,8 @@ interface FrameMiss {
    * is the reader's repair, when it gave one.
    */
   blind?: { hint?: string };
+  /** The device refuses `scroll-to` (Vega is remote-driven), so no hint may suggest one. */
+  noScrollTo?: true;
 }
 
 /**
@@ -907,6 +910,7 @@ export function selectorMiss({
   unresolved,
   matched,
   blind,
+  noScrollTo,
 }: FrameMiss): Pick<DirectiveOutcome, "reason" | "hint" | "indeterminate"> {
   const sel = describeSelector(unresolved);
   if (blind) {
@@ -927,8 +931,9 @@ export function selectorMiss({
   return {
     reason: `${matched} element${matched === 1 ? "" : "s"} matched ${sel} but none was visible (zero-area frame)`,
     hint:
-      "the element is in the tree but has no on-screen area; it may be off-screen (add a " +
-      "scroll-to step before this one), collapsed, or not laid out yet",
+      "the element is in the tree but has no on-screen area; it may be off-screen" +
+      (noScrollTo ? "" : " (add a scroll-to step before this one)") +
+      ", collapsed, or not laid out yet",
   };
 }
 
