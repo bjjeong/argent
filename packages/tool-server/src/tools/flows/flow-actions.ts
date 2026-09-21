@@ -583,9 +583,11 @@ async function waitForFrames(
   if (pending.length === 0) return selectors.map(() => undefined);
   const deadline = Date.now() + DEFAULT_ACTION_TIMEOUT_MS;
   let unresolved = pending[0].selector;
+  // The last settled tree that saw the screen. The miss is judged on it.
   let lastTree: DescribeNode | undefined;
-  // The last settled read, when the reader itself flagged it as blind. Carried
-  // into the miss so the caller reports an unreadable screen as one.
+  // The last settled read the reader flagged as blind. It decides the miss only
+  // when no read in the window saw the screen: a round that did look for the
+  // element already answered, and a blind read after it says nothing new.
   let blind: DescribeTreeData | undefined;
   for (;;) {
     if (env.signal?.aborted) return "aborted";
@@ -594,9 +596,12 @@ async function waitForFrames(
       const frames = selectors.map((s) => (s ? flowSelectorToFrame(read.tree, s) : undefined));
       const missing = pending.find(({ i }) => frames[i] === undefined);
       if (!missing) return frames;
-      unresolved = missing.selector;
-      lastTree = read.tree;
-      blind = isBlindTreeRead(read) ? read : undefined;
+      if (isBlindTreeRead(read)) {
+        blind = read;
+      } else {
+        unresolved = missing.selector;
+        lastTree = read.tree;
+      }
     } else if (env.signal?.aborted) {
       return "aborted"; // settleTree bailed on the abort, not on a blank read
     }
@@ -604,7 +609,7 @@ async function waitForFrames(
       return {
         unresolved,
         matched: lastTree ? flowFindAll(lastTree, unresolved).length : 0,
-        ...(blind !== undefined && { blind: { hint: blind.hint } }),
+        ...(lastTree === undefined && blind !== undefined && { blind: { hint: blind.hint } }),
       };
     }
     const sleepMs = Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()));
@@ -621,9 +626,9 @@ interface FrameMiss {
   unresolved: FlowSelector;
   matched: number;
   /**
-   * The screen was never read: the last settled read came back empty with the
-   * reader's own "I could not see the app" flags on it. `hint` is the reader's
-   * repair, when it gave one.
+   * The screen was never read: every settled read in the window came back
+   * empty with the reader's own "I could not see the app" flags on it. `hint`
+   * is the reader's repair, when it gave one.
    */
   blind?: { hint?: string };
 }

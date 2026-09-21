@@ -16,6 +16,7 @@ vi.mock("../../src/tools/flows/flow-tree", () => ({
 }));
 
 import { createFlowTestHarness, label, screen } from "./harness";
+import { selectorMiss, waitForFrame, type ActionEnv } from "../../src/tools/flows/flow-actions";
 
 const { run, writeFlow } = createFlowTestHarness({
   tempDirectoryPrefix: "flow-failure-details-",
@@ -152,6 +153,27 @@ describe("selector misses on a screen that was never read", () => {
       expect(steps[0]).toMatchObject({ indeterminate: true, hint: VEGA_HINT });
       expect(steps[0].reason).toMatch(/every read of the UI tree was empty or degraded/);
     }
+  }, 20_000);
+
+  it("judges a Vega cropOn miss on the rounds that looked, when only the last reads are blind", async () => {
+    // Earlier rounds read the screen and did not find the element; then the
+    // toolkit went blind. "was never looked for" would be false.
+    const blindFrom = Date.now() + 3000;
+    currentTree = () => {
+      const blind = Date.now() >= blindFrom;
+      currentFlags = blind ? { hint: VEGA_HINT } : {};
+      return blind ? screen([]) : screen([label("Home")]);
+    };
+    const env = { registry: {}, device: { id: "vega-vvd", platform: "vega" } } as ActionEnv;
+
+    const miss = await waitForFrame(env, { identifier: "price-card" });
+
+    if (miss === "aborted" || !("unresolved" in miss)) throw new Error("expected a miss");
+    expect(Date.now()).toBeGreaterThan(blindFrom);
+    expect(selectorMiss(miss)).toEqual({
+      reason: 'no element matched selector id="price-card"',
+      hint: "if it is off-screen, add a scroll-to step before this one",
+    });
   }, 20_000);
 
   it("still reports a genuinely empty screen as one, with the scroll-to hint", async () => {
