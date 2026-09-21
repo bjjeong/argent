@@ -571,7 +571,7 @@ The outcome line of a flow that produced a report gives the result, the step cou
 The `Failed flows` section has one entry for each flow that failed. Each entry holds these items:
 
 - The flow path.
-- The first step that failed or errored, with its number. A flow without a report gives its outcome line instead.
+- The first step that failed or errored, with its number. An `echo` step has no number, so Argent gives its message instead. A flow without a report gives its outcome line instead.
 - The reason of that step, or the error message of a flow without a report.
 - A `re-run:` command that runs only that flow. The command uses the same `--device`, `--platform`, `--update-baselines` and `--env` options as the directory run. The command shows each `--env` value as you wrote it. If the directory run has `--output`, the command writes the images of that flow to the same directory as the directory run.
 

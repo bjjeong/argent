@@ -464,10 +464,14 @@ interface FailedFlow {
 export function summarizeFailure(report: FlowReport): Pick<FailedFlow, "headline" | "detail"> {
   let n = 0;
   for (const s of report.steps) {
-    if (s.kind === "echo") continue;
-    n++;
+    // An echo is unnumbered narration, except that one whose `{{output:…}}`
+    // reference did not resolve errors, and it is what stopped the run.
+    const echo = s.kind === "echo";
+    if (!echo) n++;
     if (s.status === "fail" || s.status === "error") {
       const detail = s.reason ? String(s.reason) : undefined;
+      if (echo)
+        return { headline: s.message ? `echo ${JSON.stringify(s.message)}` : "echo", detail };
       return { headline: `step ${n} ${stepLabel(s, report.flow)}`, detail };
     }
   }

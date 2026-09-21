@@ -173,6 +173,9 @@ describe("flow report rendering", () => {
         "  ✗ › Promo {{output:user.promo}} — `echo`: {{output:user.promo}} did not resolve",
         '  ·  2 tap "Apply"',
         "",
+        '  ✗ echo "Promo {{output:user.promo}}"',
+        "    `echo`: {{output:user.promo}} did not resolve",
+        "",
         "FAIL — 1 passed, 0 failed, 1 errored, 1 skipped",
       ].join("\n")
     );
@@ -505,6 +508,28 @@ describe("failure recap", () => {
     const report = mkReport([step]);
     expect(renderStepLine(step, 1, "checkout")).toBe("  ✗  1 tap — 42");
     expect(renderSingleFailure(report)).toEqual(["", "  ✗ step 1 tap", "    42"]);
+  });
+
+  it("names an errored echo by its message, since an echo has no step number", () => {
+    const report = mkReport(
+      [
+        { index: 0, kind: "tap", status: "pass" },
+        { index: 1, kind: "echo", status: "pass", message: "Seeding" },
+        {
+          index: 2,
+          kind: "echo",
+          status: "error",
+          message: "Promo {{output:user.promo}}",
+          reason: "`echo`: {{output:user.promo}} did not resolve",
+        },
+        { index: 3, kind: "assert", status: "skip" },
+      ],
+      { ok: false, errored: 1 }
+    );
+    expect(summarizeFailure(report)).toEqual({
+      headline: 'echo "Promo {{output:user.promo}}"',
+      detail: "`echo`: {{output:user.promo}} did not resolve",
+    });
   });
 
   it("says so when a failed report has no failing step", () => {
