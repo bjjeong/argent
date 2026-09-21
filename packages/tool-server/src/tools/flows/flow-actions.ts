@@ -159,6 +159,9 @@ export interface DirectiveOutcome {
    * condition to fall back on, is scored `error`; the recorder's cross-tree
    * re-probe keeps the step and warns that the conversion is UNKNOWN, not
    * known-bad.
+   *
+   * A step that resolves a frame (the tap family, `cropOn`) sets it too, when
+   * every settled read in its window was blind (see {@link selectorMiss}).
    */
   indeterminate?: boolean;
   /**
@@ -620,8 +623,9 @@ async function waitForFrames(
 
 /**
  * A selector that never resolved to a visible frame. `matched` counts what it
- * matched on the last settled tree anyway: every one of those has a zero-area
- * frame.
+ * matched anyway on the last settled tree that saw the screen: the matches of
+ * its first alternative that matched anything (see {@link flowFindAll}). Every
+ * one of those has a zero-area frame.
  */
 interface FrameMiss {
   unresolved: FlowSelector;
@@ -904,8 +908,9 @@ async function scrollToVisible(
 // A blind read gets neither: "no element matched" is a claim about what the
 // screen HOLDS, and a read the reader flagged as blind supports no such claim —
 // nothing was ever looked at, so scrolling cannot help and editing the flow is
-// the wrong move. `assert` and `idle` already refuse a verdict on that read;
-// this is the same refusal for the steps that resolve a frame.
+// the wrong move. `assert` and `idle` refuse a verdict when no read in their
+// window was trustworthy; this refuses one when no read in the wait saw the
+// screen (see {@link waitForFrames}).
 export function selectorMiss({
   unresolved,
   matched,
@@ -1748,7 +1753,9 @@ async function waitForCondition(
   // 3. Dark tail within the tolerance — a genuine last-poll blip: the trusted
   //    reads still describe the window, so a transient error on the trailing
   //    poll must not flip a clean skip into a hard error. The determinate
-  //    verdict stands, with the failed final read reported as a note.
+  //    verdict stands. A final read that threw is reported as a note; one that
+  //    came back empty or degraded has no error to report, so the verdict
+  //    stands without one.
   const unread = {
     ...(fetchRefused && { refused: true as const }),
     ...(blindHint !== undefined && { hint: blindHint }),

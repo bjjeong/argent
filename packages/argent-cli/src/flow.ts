@@ -268,9 +268,9 @@ export function renderStepLine(s: StepReport, n: number, topFlow: string): strin
 }
 
 /**
- * A line printed under a step (warning, artifact path), padded to the width of
- * renderStepLine's `  ✓ NN ` prefix — which grows past step 99 — plus the
- * step's depth indent. Shared by the buffered and live renderers.
+ * A line printed under a step (warning, detail line, artifact path), padded to
+ * the width of renderStepLine's `  ✓ NN ` prefix — which grows past step 99 —
+ * plus the step's depth indent. Shared by the buffered and live renderers.
  */
 export function renderUnderStepLine(s: StepReport, n: number, text: string): string {
   return `${" ".repeat(5 + Math.max(2, String(n).length))}${stepIndent(s.depth)}${text}`;
@@ -303,8 +303,9 @@ function escapeInvisible(v: string): string {
 }
 
 /**
- * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step that
- * did not pass.
+ * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step. The
+ * tool-server sets these fields only on a step that did not pass, so a passing
+ * step prints none; the status itself is not checked here.
  *
  * An invisible character is ESCAPED, never replaced: these lines are the only
  * place the found text is printed, and a value that differs from the expected
@@ -324,8 +325,9 @@ function stepDetailTexts(s: StepReport): string[] {
   const value = (v: string): string =>
     escapeInvisible(s.kind === "snapshot" ? v : JSON.stringify(v));
   // A pattern prints as its source in slash delimiters — the spelling the step
-  // line and the reason use — so it can be copied back into `matches:`. JSON
-  // quoting would double each backslash, making `\d` a literal backslash.
+  // line and the reason use. The text between the slashes is the `matches:`
+  // value. JSON quoting would double each backslash, making `\d` a literal
+  // backslash.
   const expected = (v: string): string =>
     s.expectedKind === "pattern" ? `/${escapeInvisible(v)}/` : value(v);
   const lines: string[] = [];

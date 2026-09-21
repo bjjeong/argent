@@ -202,7 +202,10 @@ export interface StepReport {
    * from one that waited.
    */
   warning?: string;
-  /** What to try first about a step that did not pass. Never restates `reason`. */
+  /**
+   * What to try first about a step that did not pass, or a fact that helps
+   * choose the fix (for example the element's own text).
+   */
   hint?: string;
   expected?: string;
   actual?: string;

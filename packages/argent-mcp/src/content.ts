@@ -302,8 +302,9 @@ function escapeInvisible(v: string): string {
 }
 
 /**
- * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step that
- * did not pass.
+ * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step. The
+ * tool-server sets these fields only on a step that did not pass, so a passing
+ * step prints none; the status itself is not checked here.
  *
  * An invisible character is ESCAPED, never replaced: these lines are the only
  * place the found text is printed, and a value that differs from the expected
@@ -319,8 +320,9 @@ function stepDetailText(step: FlowStepResult): string | undefined {
   const value = (v: string): string =>
     escapeInvisible(step.kind === "snapshot" ? v : JSON.stringify(v));
   // A pattern prints as its source in slash delimiters — the spelling the step
-  // line and the reason use — so it can be copied back into `matches:`. JSON
-  // quoting would double each backslash, making `\d` a literal backslash.
+  // line and the reason use. The text between the slashes is the `matches:`
+  // value. JSON quoting would double each backslash, making `\d` a literal
+  // backslash.
   const expected = (v: string): string =>
     step.expectedKind === "pattern" ? `/${escapeInvisible(v)}/` : value(v);
   const indent = `  ${stepIndent(step.depth)}`;
