@@ -138,10 +138,12 @@ async function cropPngFile(
  * the value wanted. Any tolerance below 0.005% reads that way, and so does a
  * real mismatch that rounds down onto the tolerance.
  *
- * Widening stops at 8 decimals. One pixel of the largest capture this runner
- * takes is orders of magnitude above that, so a diff and a tolerance closer
- * than 1e-8 of a percentage point cannot be measured apart; the exponential
- * form is a last resort that keeps the value honest rather than exact.
+ * Widening stops at 8 decimals. Past that, the diff and the tolerance differ
+ * only by floating-point error: 7 of 1000 pixels computes 0.7000000000000001%,
+ * which fails `maxMismatch: 0.7`. Any rounding of it prints `0.7`, the
+ * tolerance itself, beside a failed verdict, so the value prints in full: the
+ * shortest spelling that reads back as the same number, and so stays on its
+ * side of the tolerance.
  */
 function formatMismatch(measured: number, tolerance: number): string {
   const within = measured <= tolerance;
@@ -149,7 +151,7 @@ function formatMismatch(measured: number, tolerance: number): string {
     const shown = measured.toFixed(decimals);
     if (Number(shown) <= tolerance === within) return `${shown}%`;
   }
-  return `${measured.toExponential(2)}%`;
+  return `${String(measured)}%`;
 }
 
 /**

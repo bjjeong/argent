@@ -320,6 +320,20 @@ describe("runSnapshot baselines", () => {
     expect(r).toMatchObject({ expected: "≤ 0.5%", actual: "0.5004%" });
   });
 
+  it("prints a diff that differs from the tolerance only by float error in full", async () => {
+    await fs.mkdir(path.dirname(baselinePath()), { recursive: true });
+    await writeFakePng(baselinePath());
+    // 7 of 1000 pixels. Every rounding prints the tolerance itself, 0.7, next
+    // to a failed verdict.
+    h.mismatchPercentage = (7 / 1000) * 100;
+
+    const r = await runSnapshot(env, opts({ maxMismatch: 0.7 }));
+
+    expect(r.status).toBe("fail");
+    expect(r.reason).toContain("diff 0.7000000000000001% > 0.7%");
+    expect(r).toMatchObject({ expected: "≤ 0.7%", actual: "0.7000000000000001%" });
+  });
+
   it("keeps two decimals on a pass the rounding cannot contradict", async () => {
     await fs.mkdir(path.dirname(baselinePath()), { recursive: true });
     await writeFakePng(baselinePath());
