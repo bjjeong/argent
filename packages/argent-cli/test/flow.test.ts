@@ -45,6 +45,8 @@ interface StepFixture {
   hint?: string;
   expected?: string;
   actual?: string;
+  indeterminate?: boolean;
+  depth?: number;
   tool?: string;
   flow?: string;
   message?: string;
@@ -2353,6 +2355,96 @@ describe("argent flow run <dir>", () => {
       `    re-run: argent flow run ${path.join("flows", "a-login.yaml")} --platform ios`,
       "",
       "FAIL — 2 flows: 1 passed, 1 failed, 0 skipped (0.0s)",
+    ]);
+  });
+
+  it("prints a failed step's detail lines in its flow's block and again in the recap", async () => {
+    toolsClientMock.callTool
+      .mockResolvedValueOnce({
+        data: report({
+          flow: "a-login",
+          ok: false,
+          passed: 2,
+          failed: 1,
+          steps: [
+            { index: 0, kind: "tap", status: "pass", target: '"Cart"' },
+            {
+              index: 1,
+              kind: "when",
+              status: "pass",
+              target: 'visible "Promo"',
+              reason: 'condition met (visible "Promo")',
+            },
+            {
+              index: 2,
+              kind: "assert",
+              status: "fail",
+              depth: 1,
+              target: 'text "Total"',
+              reason: "text did not match",
+              expected: "$12.00",
+              actual: "$10.00",
+              hint: "the cart may still be loading",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        data: report({
+          flow: "b-checkout",
+          ok: false,
+          passed: 0,
+          failed: 1,
+          skipped: 1,
+          steps: [
+            {
+              index: 0,
+              kind: "await",
+              status: "fail",
+              target: 'visible "Paid"',
+              reason: "could not read the UI tree: CDP went away",
+              indeterminate: true,
+              hint: "check the app is still running",
+            },
+            { index: 1, kind: "tap", status: "skip", target: '"Done"' },
+          ],
+        }),
+      });
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    await expect(flow(["run", flowsDir], opts)).rejects.toThrow("process.exit:1");
+
+    // In a flow's block the lines sit under the step label, nested with it.
+    // The recap drops that nesting and prints them under the reason.
+    expect(logs.join("\n").split("\n")).toEqual([
+      "[1/2] a-login.yaml",
+      '  ✗  3   assert text "Total" — text did not match',
+      '         expected: "$12.00"',
+      '         actual:   "$10.00"',
+      "         hint: the cart may still be loading",
+      "  FAIL (started on SIM-1) — 2 passed, 1 failed, 0 errored, 0 skipped",
+      "[2/2] b-checkout.yaml",
+      '  ✗  1 await visible "Paid" — could not read the UI tree: CDP went away',
+      "       indeterminate: the check did not run",
+      "       hint: check the app is still running",
+      "  FAIL (started on SIM-1) — 0 passed, 1 failed, 0 errored, 1 skipped",
+      "",
+      "Failed flows (2)",
+      "",
+      '  ✗ a-login.yaml › step 3 assert text "Total"',
+      "    text did not match",
+      '    expected: "$12.00"',
+      '    actual:   "$10.00"',
+      "    hint: the cart may still be loading",
+      `    re-run: argent flow run ${path.join(flowsDir, "a-login.yaml")}`,
+      "",
+      '  ✗ b-checkout.yaml › step 1 await visible "Paid"',
+      "    could not read the UI tree: CDP went away",
+      "    indeterminate: the check did not run",
+      "    hint: check the app is still running",
+      `    re-run: argent flow run ${path.join(flowsDir, "b-checkout.yaml")}`,
+      "",
+      "FAIL — 2 flows: 0 passed, 2 failed, 0 skipped (0.0s)",
     ]);
   });
 

@@ -272,6 +272,44 @@ describe("flow report rendering", () => {
     expect(lines[0]!.indexOf("expected")).toBe(renderStepLine(step, 3, "f").indexOf("assert"));
   });
 
+  it("renderStepDetailLines stays under the label when nested and past step 99", () => {
+    // The number column widens at 100+ and the label shifts with depth; each
+    // detail line has to move with both.
+    const step: StepReport = {
+      index: 0,
+      kind: "assert",
+      status: "fail",
+      target: 'text "Total"',
+      expected: "$12.00",
+      actual: "$10.00",
+      indeterminate: true,
+      hint: "wait for the cart",
+    };
+    for (const n of [3, 100, 1000]) {
+      for (const depth of [undefined, 1, 2]) {
+        const nested = { ...step, depth };
+        const labelCol = renderStepLine(nested, n, "f").indexOf("assert");
+        const lines = renderStepDetailLines(nested, n);
+        expect(lines).toHaveLength(4);
+        expect(lines[0]!.indexOf("expected")).toBe(labelCol);
+        for (const line of lines) expect(line.search(/\S/)).toBe(labelCol);
+      }
+    }
+    expect(renderStepLine({ ...step, depth: 2 }, 1000, "f")).toBe(
+      '  ✗ 1000     assert text "Total"'
+    );
+    expect(renderStepDetailLines({ ...step, depth: 2 }, 1000)).toEqual([
+      '             expected: "$12.00"',
+      '             actual:   "$10.00"',
+      "             indeterminate: the check did not run",
+      "             hint: wait for the cart",
+    ]);
+    expect(renderStepLine({ ...step, depth: 1 }, 100, "f")).toBe('  ✗ 100   assert text "Total"');
+    expect(renderStepDetailLines({ ...step, depth: 1 }, 100)[0]).toBe(
+      '          expected: "$12.00"'
+    );
+  });
+
   it("renderStepDetailLines escapes control characters in values and the hint", () => {
     const text: StepReport = {
       index: 0,
