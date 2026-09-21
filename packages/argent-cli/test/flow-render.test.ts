@@ -362,6 +362,51 @@ describe("flow report rendering", () => {
     expect(lines[0]!.replace("expected: ", "")).not.toBe(lines[1]!.replace("actual:   ", ""));
   });
 
+  it("renderStepDetailLines escapes the invisible characters JSON quoting keeps raw", () => {
+    // Each of these prints as nothing or as a plain space, so without an escape
+    // the actual line reads as a twin of the expected one.
+    const step: StepReport = {
+      index: 0,
+      kind: "assert",
+      status: "fail",
+      expected: "10:30 AM Pay now",
+      actual: "10:30\u202fAM Pay\u200bnow\u00a0\u007f\u0085\u2066x\u2069\u2028",
+      hint: 'own text is "Ship\u00a0to"',
+    };
+    const lines = renderStepDetailLines(step, 1);
+    expect(lines).toEqual([
+      '       expected: "10:30 AM Pay now"',
+      '       actual:   "10:30\\u202fAM Pay\\u200bnow\\u00a0\\u007f\\u0085\\u2066x\\u2069\\u2028"',
+      '       hint: own text is "Ship\\u00a0to"',
+    ]);
+    for (const line of lines) expect(line).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u00a0\u202f]/u);
+    // A snapshot value and a pattern get the same escapes.
+    expect(
+      renderStepDetailLines(
+        {
+          ...step,
+          kind: "snapshot",
+          expected: "\u2264\u00a00.5%",
+          actual: undefined,
+          hint: undefined,
+        },
+        1
+      )
+    ).toEqual(["       expected: \u2264\\u00a00.5%"]);
+    expect(
+      renderStepDetailLines(
+        {
+          ...step,
+          expected: "^a\u200bb$",
+          expectedKind: "pattern",
+          actual: undefined,
+          hint: undefined,
+        },
+        1
+      )
+    ).toEqual(["       expected: /^a\\u200bb$/"]);
+  });
+
   it("renderStepDetailLines prints only the fields a step carries", () => {
     expect(
       renderStepDetailLines({ index: 0, kind: "tap", status: "fail", reason: "no match" }, 1)

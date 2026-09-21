@@ -718,6 +718,33 @@ describe("flowRunToMcpContent", () => {
     });
   });
 
+  it("escapes the invisible characters JSON quoting keeps raw", async () => {
+    // A zero-width space, a no-break space, DEL, a C1 control and a bidi isolate
+    // all print as nothing or as a plain space.
+    const blocks = await flowRunToMcpContent({
+      flow: "f",
+      steps: [
+        {
+          index: 0,
+          kind: "assert",
+          status: "fail",
+          reason: 'element matched id="pay" but its text did not equal "Pay now"',
+          expected: "Pay now",
+          actual: "Pay\u200bnow\u00a0\u007f\u0085\u2066",
+          hint: 'own text is "10:30\u202fAM"',
+        },
+      ],
+    });
+
+    expect(blocks[2]).toEqual({
+      type: "text",
+      text:
+        '  expected: "Pay now"\n' +
+        '  actual:   "Pay\\u200bnow\\u00a0\\u007f\\u0085\\u2066"\n' +
+        '  hint: own text is "10:30\\u202fAM"',
+    });
+  });
+
   it("prints a hint that quotes device text with one spelling of its quotes and backslashes", async () => {
     // The tool-server quotes the own text as JSON, the same spelling as the
     // `actual:` line. The hint line must not escape it a second time.
