@@ -204,6 +204,8 @@ export type FlowStepResult = {
    * value to compare literally.
    */
   expectedKind?: "pattern";
+  /** Set by the tool-server when the step could not read the UI tree to do its check. */
+  indeterminate?: true;
   tool?: string;
   message?: string;
   result?: unknown;
@@ -300,7 +302,8 @@ function escapeInvisible(v: string): string {
 }
 
 /**
- * The `expected:`, `actual:` and `hint:` lines of a step that did not pass.
+ * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step that
+ * did not pass.
  *
  * An invisible character is ESCAPED, never replaced: these lines are the only
  * place the found text is printed, and a value that differs from the expected
@@ -325,6 +328,9 @@ function stepDetailText(step: FlowStepResult): string | undefined {
   if (typeof step.expected === "string")
     lines.push(`${indent}expected: ${expected(step.expected)}`);
   if (typeof step.actual === "string") lines.push(`${indent}actual:   ${value(step.actual)}`);
+  // The result JSON carries the flag; without this line an agent can tell a
+  // check that never ran only from the prose of its reason.
+  if (step.indeterminate === true) lines.push(`${indent}indeterminate: the check did not run`);
   if (typeof step.hint === "string") lines.push(`${indent}hint: ${escapeInvisible(step.hint)}`);
   return lines.length > 0 ? lines.join("\n") : undefined;
 }

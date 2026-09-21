@@ -35,6 +35,8 @@ export interface StepReport {
    * value to compare literally.
    */
   expectedKind?: "pattern";
+  /** Set by the tool-server when the step could not read the UI tree to do its check. */
+  indeterminate?: true;
   tool?: string;
   flow?: string;
   message?: string;
@@ -301,7 +303,8 @@ function escapeInvisible(v: string): string {
 }
 
 /**
- * The `expected:`, `actual:` and `hint:` lines of a step that did not pass.
+ * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step that
+ * did not pass.
  *
  * An invisible character is ESCAPED, never replaced: these lines are the only
  * place the found text is printed, and a value that differs from the expected
@@ -328,6 +331,9 @@ function stepDetailTexts(s: StepReport): string[] {
   const lines: string[] = [];
   if (typeof s.expected === "string") lines.push(`expected: ${expected(s.expected)}`);
   if (typeof s.actual === "string") lines.push(`actual:   ${value(s.actual)}`);
+  // The JSON outputs carry the flag; without this line a reader of the text
+  // can tell a check that never ran only from the prose of its reason.
+  if (s.indeterminate === true) lines.push("indeterminate: the check did not run");
   if (typeof s.hint === "string") lines.push(`hint: ${escapeInvisible(s.hint)}`);
   return lines;
 }

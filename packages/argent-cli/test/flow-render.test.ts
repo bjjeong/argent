@@ -407,6 +407,24 @@ describe("flow report rendering", () => {
     ).toEqual(["       expected: /^a\\u200bb$/"]);
   });
 
+  it("renderStepDetailLines marks a step whose check did not run, above its hint", () => {
+    const step: StepReport = {
+      index: 0,
+      kind: "await",
+      status: "fail",
+      reason: "could not read the UI tree: CDP went away",
+      indeterminate: true,
+      hint: "check the app first",
+    };
+    expect(renderStepDetailLines(step, 1)).toEqual([
+      "       indeterminate: the check did not run",
+      "       hint: check the app first",
+    ]);
+    // Only the literal `true` the tool-server sends counts.
+    const hostile = { ...step, indeterminate: "yes", hint: undefined } as unknown as StepReport;
+    expect(renderStepDetailLines(hostile, 1)).toEqual([]);
+  });
+
   it("renderStepDetailLines prints only the fields a step carries", () => {
     expect(
       renderStepDetailLines({ index: 0, kind: "tap", status: "fail", reason: "no match" }, 1)

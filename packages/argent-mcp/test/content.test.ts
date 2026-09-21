@@ -718,6 +718,27 @@ describe("flowRunToMcpContent", () => {
     });
   });
 
+  it("marks a step whose check did not run, above its hint", async () => {
+    const blocks = await flowRunToMcpContent({
+      flow: "f",
+      steps: [
+        {
+          index: 0,
+          kind: "await",
+          status: "fail",
+          reason: "could not read the UI tree: CDP went away",
+          indeterminate: true,
+          hint: "check the app first",
+        },
+      ],
+    });
+
+    expect(blocks[2]).toEqual({
+      type: "text",
+      text: "  indeterminate: the check did not run\n  hint: check the app first",
+    });
+  });
+
   it("escapes the invisible characters JSON quoting keeps raw", async () => {
     // A zero-width space, a no-break space, DEL, a C1 control and a bidi isolate
     // all print as nothing or as a plain space.

@@ -356,11 +356,12 @@ Each step line shows the time of the step before the reason, for example `(1.2s)
 
 The reason of a step that did not pass states what failed. Under that step, Argent prints each of these lines that applies to the failure:
 
-| Line        | Content                                                                         |
-| ----------- | ------------------------------------------------------------------------------- |
-| `expected:` | The value that the check wanted: a text, a snapshot tolerance or an image size  |
-| `actual:`   | The value that the check found. Argent shows the first 300 characters of a text |
-| `hint:`     | The first thing to try                                                          |
+| Line             | Content                                                                         |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `expected:`      | The value that the check wanted: a text, a snapshot tolerance or an image size  |
+| `actual:`        | The value that the check found. Argent shows the first 300 characters of a text |
+| `indeterminate:` | The check did not run, because Argent could not read the UI tree                |
+| `hint:`          | The first thing to try                                                          |
 
 ```
   ✗  3 assert id=total equals "$42.00" (1.0s) — element matched id="total" but its text did not equal "$42.00"
@@ -398,7 +399,7 @@ The `Failed flows` section has one entry for each flow that failed. Each entry h
 - The flow path.
 - The first step that failed or errored, with its number. A flow without a report gives its outcome line instead.
 - The reason of that step, or the error message of a flow without a report.
-- The `expected:`, `actual:` and `hint:` lines of that step that apply to the failure.
+- The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of that step that apply to the failure.
 - A `re-run:` command that runs only that flow. The command uses the same `--device`, `--platform` and `--update-baselines` options as the directory run. If the directory run has `--output`, the command writes the images of that flow to the same directory as the directory run.
 
 The section does not include the flows that Argent skipped.
@@ -419,7 +420,7 @@ Failed flows (2)
 FAIL — 4 flows: 2 passed, 2 failed, 0 skipped (10.2s)
 ```
 
-When a single flow run fails its steps, Argent prints the first step that failed or errored again above the last line. Under that step, Argent prints its reason and its `expected:`, `actual:` and `hint:` lines again.
+When a single flow run fails its steps, Argent prints the first step that failed or errored again above the last line. Under that step, Argent prints its reason and its `expected:`, `actual:`, `indeterminate:` and `hint:` lines again.
 
 `--json` and `--json-stream` print no header, no outcome line, no `Failed flows` section and no summary.
 
