@@ -718,6 +718,28 @@ describe("flowRunToMcpContent", () => {
     });
   });
 
+  it("cuts a long actual at 300 characters and counts the rest outside the quotes", async () => {
+    const text = "a".repeat(299) + "😀" + "b".repeat(1300);
+    const blocks = await flowRunToMcpContent({
+      flow: "f",
+      steps: [
+        {
+          index: 0,
+          kind: "assert",
+          status: "fail",
+          reason: 'element matched id="log" but its text did not contain "Done"',
+          expected: "Done",
+          actual: text,
+        },
+      ],
+    });
+
+    expect(blocks[2]).toEqual({
+      type: "text",
+      text: `  expected: "Done"\n  actual:   "${"a".repeat(299)}😀" … (1,300 more characters)`,
+    });
+  });
+
   it("marks a step whose check did not run, above its hint", async () => {
     const blocks = await flowRunToMcpContent({
       flow: "f",

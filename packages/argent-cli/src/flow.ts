@@ -285,6 +285,21 @@ export function renderUnderStepLine(s: StepReport, n: number, text: string): str
  */
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu;
 
+const MAX_ACTUAL_CHARS = 300;
+
+/**
+ * An `actual:` value cut to its first 300 characters, with the count of the
+ * rest after it, outside the quotes. The report keeps the whole found text;
+ * the cut is only for the line, so it never reads as device text. Counted in
+ * code points, so the cut never splits a surrogate pair.
+ */
+function capped(v: string, print: (v: string) => string): string {
+  const chars = Array.from(v);
+  if (chars.length <= MAX_ACTUAL_CHARS) return print(v);
+  const rest = (chars.length - MAX_ACTUAL_CHARS).toLocaleString("en-US");
+  return `${print(chars.slice(0, MAX_ACTUAL_CHARS).join(""))} … (${rest} more characters)`;
+}
+
 /**
  * Escape only the invisible characters of a value, each in its JSON spelling
  * (`\n`, `\t`, `\u0007`, `\u00a0`). Everything else — a backslash above all —
@@ -332,7 +347,7 @@ function stepDetailTexts(s: StepReport): string[] {
     s.expectedKind === "pattern" ? `/${escapeInvisible(v)}/` : value(v);
   const lines: string[] = [];
   if (typeof s.expected === "string") lines.push(`expected: ${expected(s.expected)}`);
-  if (typeof s.actual === "string") lines.push(`actual:   ${value(s.actual)}`);
+  if (typeof s.actual === "string") lines.push(`actual:   ${capped(s.actual, value)}`);
   // The JSON outputs carry the flag; without this line a reader of the text
   // can tell a check that never ran only from the prose of its reason.
   if (s.indeterminate === true) lines.push("indeterminate: the check did not run");

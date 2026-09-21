@@ -256,7 +256,7 @@ describe("text check failures", () => {
     );
   });
 
-  it("caps a long own text in the hint at 300 characters", async () => {
+  it("cuts a long own text in the hint at 300 characters and counts the rest outside the quotes", async () => {
     const own = "Total ".repeat(80);
     currentTree = () => screen([label(own, { identifier: "total", subtreeText: `${own} $41.50` })]);
     await writeFlow("own-text-long", { executionPrerequisite: "", steps: [assertTotalEquals42] });
@@ -264,7 +264,8 @@ describe("text check failures", () => {
     const [step] = (await run("own-text-long")).steps;
 
     expect(step.hint).toBe(
-      `the element's own text is "${own.slice(0, 300)}…"; the check accepts the subtree text or the own text`
+      `the element's own text is "${own.slice(0, 300)}" … (180 more characters); the check ` +
+        "accepts the subtree text or the own text"
     );
   });
 
@@ -292,7 +293,9 @@ describe("text check failures", () => {
     expect(step).not.toHaveProperty("indeterminate");
   });
 
-  it("caps a long actual text at 300 characters and keeps it out of the reason", async () => {
+  it("keeps the whole found text in actual, and out of the reason", async () => {
+    // A difference late in a large container's text must stay visible in the
+    // report. Only the printed line is cut.
     const screenText = "Home Cart Checkout Pay Total $41.50 Apply coupon "
       .repeat(50)
       .slice(0, 299)
@@ -315,7 +318,7 @@ describe("text check failures", () => {
 
     expect(step.status).toBe("fail");
     expect(step.expected).toBe("Order placed");
-    expect(step.actual).toBe(`${screenText.slice(0, 299)}…`);
+    expect(step.actual).toBe(screenText);
     expect(step.reason).toBe(
       'element matched id="root" but its text did not contain "Order placed"'
     );

@@ -284,6 +284,21 @@ function durationSuffix(ms: unknown): string {
  */
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu;
 
+const MAX_ACTUAL_CHARS = 300;
+
+/**
+ * An `actual:` value cut to its first 300 characters, with the count of the
+ * rest after it, outside the quotes. The report keeps the whole found text;
+ * the cut is only for the line, so it never reads as device text. Counted in
+ * code points, so the cut never splits a surrogate pair.
+ */
+function capped(v: string, print: (v: string) => string): string {
+  const chars = Array.from(v);
+  if (chars.length <= MAX_ACTUAL_CHARS) return print(v);
+  const rest = (chars.length - MAX_ACTUAL_CHARS).toLocaleString("en-US");
+  return `${print(chars.slice(0, MAX_ACTUAL_CHARS).join(""))} … (${rest} more characters)`;
+}
+
 /**
  * Escape only the invisible characters of a value, each in its JSON spelling
  * (`\n`, `\t`, `\u0007`, `\u00a0`). Everything else — a backslash above all —
@@ -329,7 +344,8 @@ function stepDetailText(step: FlowStepResult): string | undefined {
   const lines: string[] = [];
   if (typeof step.expected === "string")
     lines.push(`${indent}expected: ${expected(step.expected)}`);
-  if (typeof step.actual === "string") lines.push(`${indent}actual:   ${value(step.actual)}`);
+  if (typeof step.actual === "string")
+    lines.push(`${indent}actual:   ${capped(step.actual, value)}`);
   // The result JSON carries the flag; without this line an agent can tell a
   // check that never ran only from the prose of its reason.
   if (step.indeterminate === true) lines.push(`${indent}indeterminate: the check did not run`);

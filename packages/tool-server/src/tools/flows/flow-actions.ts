@@ -197,13 +197,19 @@ export interface DirectiveOutcome {
   expectedKind?: "pattern";
 }
 
-const MAX_ACTUAL_CHARS = 300;
+const MAX_QUOTED_CHARS = 300;
 
-function capActual(text: string): string {
-  if (text.length <= MAX_ACTUAL_CHARS) return text;
-  // Never end on half a surrogate pair: the report is JSON, and a lone
-  // surrogate breaks strict UTF-8 consumers.
-  return `${text.slice(0, MAX_ACTUAL_CHARS).replace(/[\uD800-\uDBFF]$/, "")}…`;
+/**
+ * Device text JSON-quoted for a hint, cut to its first 300 characters. The
+ * count of the rest follows outside the quotes, so the cut never reads as
+ * device text. A step's `actual` keeps the whole text; only prose is cut here.
+ * Counted in code points, so the cut never splits a surrogate pair.
+ */
+function quoteCapped(text: string): string {
+  const chars = Array.from(text);
+  if (chars.length <= MAX_QUOTED_CHARS) return JSON.stringify(text);
+  const rest = (chars.length - MAX_QUOTED_CHARS).toLocaleString("en-US");
+  return `${JSON.stringify(chars.slice(0, MAX_QUOTED_CHARS).join(""))} … (${rest} more characters)`;
 }
 
 /**
@@ -2410,12 +2416,12 @@ function assertReason(
         reason: `element matched ${sel} but its text did not ${wanted}`,
         expected: expectedText ?? "",
         ...(textMatch === "matches" && { expectedKind: "pattern" as const }),
-        actual: capActual(shown),
+        actual: shown,
         ...(own !== "" &&
           own !== shown && {
             // JSON-quoted like the `actual:` line, so a quote or a backslash
             // in the device text cannot end the quoted value early.
-            hint: `the element's own text is ${JSON.stringify(capActual(own))}; the check accepts the subtree text or the own text`,
+            hint: `the element's own text is ${quoteCapped(own)}; the check accepts the subtree text or the own text`,
           }),
       };
     }

@@ -356,12 +356,12 @@ Each step line shows the time of the step before the reason, for example `(1.2s)
 
 The reason of a step that did not pass states what failed. Under that step, Argent prints each of these lines that applies to the failure. The CLI and the result of the `flow-execute` tool show the same lines:
 
-| Line             | Content                                                                         |
-| ---------------- | ------------------------------------------------------------------------------- |
-| `expected:`      | The value that the check wanted: a text, a snapshot tolerance or an image size  |
-| `actual:`        | The value that the check found. Argent shows the first 300 characters of a text |
-| `indeterminate:` | The check did not run, because Argent could not read the UI tree                |
-| `hint:`          | A thing to try first, or a fact that helps you find the cause                   |
+| Line             | Content                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `expected:`      | The value that the check wanted: a text, a snapshot tolerance or an image size                                                       |
+| `actual:`        | The value that the check found. Argent shows the first 300 characters of a text, then the number of characters that it does not show |
+| `indeterminate:` | The check did not run, because Argent could not read the UI tree                                                                     |
+| `hint:`          | A thing to try first, or a fact that helps you find the cause                                                                        |
 
 ```
   ✗  3 assert id=total equals "$42.00" (1.0s) — element matched id="total" but its text did not equal "$42.00"
@@ -432,7 +432,7 @@ When a single flow run fails its steps, Argent prints the first step that failed
 
 A directory run with `--json` writes one document. The document holds `ok`, `total`, `passed`, `failed`, `skipped`, `durationMs` and a `flows` array. `durationMs` is the time of the directory run in milliseconds. The array holds one entry for each flow. Each entry holds the `path` and the `status`. An entry holds `report` when the flow produced one, whether it passed or failed its steps. An entry holds `error` instead when the tool call produced no report — a rejected run, a run error, or a reply that is not a report. Such an entry also holds `error_code` and `error_kind` when the tool-server sends them. An entry with the status `skip` holds neither, because Argent made no call for that flow. `--json-stream` puts the same two fields on its `error` record.
 
-A single flow run with `--json` writes the report of that flow. The report holds `startedAt`, the start of the run in epoch milliseconds, and `durationMs`, the time of the run in milliseconds. Each step that ran holds its own `durationMs`. A step that did not pass can also hold `hint`, `expected` and `actual`, with the content of the lines above. A step whose `expected` holds a regular expression also holds `expectedKind: "pattern"`. The `expected` field of such a step holds the source of the pattern, without the slashes. A step holds `indeterminate: true`, shown as the `indeterminate:` line, when the step did not do its check because Argent could not read the UI tree. A `tool: flow-execute` step copies these fields from the first step that failed in the composed flow. Each `progress` record of `--json-stream` holds one step, with the same `durationMs`. When the run gets no report, Argent puts the reason on stderr instead. Use `--json-stream` to get the failure as a record.
+A single flow run with `--json` writes the report of that flow. The report holds `startedAt`, the start of the run in epoch milliseconds, and `durationMs`, the time of the run in milliseconds. Each step that ran holds its own `durationMs`. A step that did not pass can also hold `hint`, `expected` and `actual`, with the content of the lines above. `actual` holds all of the text that the check found. A step whose `expected` holds a regular expression also holds `expectedKind: "pattern"`. The `expected` field of such a step holds the source of the pattern, without the slashes. A step holds `indeterminate: true`, shown as the `indeterminate:` line, when the step did not do its check because Argent could not read the UI tree. A `tool: flow-execute` step copies these fields from the first step that failed in the composed flow. Each `progress` record of `--json-stream` holds one step, with the same `durationMs`. When the run gets no report, Argent puts the reason on stderr instead. Use `--json-stream` to get the failure as a record.
 
 These steps can hold `indeterminate: true`:
 

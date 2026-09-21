@@ -463,6 +463,19 @@ describe("flow report rendering", () => {
     expect(renderStepDetailLines(hostile, 1)).toEqual([]);
   });
 
+  it("renderStepDetailLines cuts a long actual at 300 characters and counts the rest outside the quotes", () => {
+    // 299 characters, an emoji (two UTF-16 units, one character), then more.
+    const text = "a".repeat(299) + "😀" + "b".repeat(1300);
+    const step: StepReport = { index: 0, kind: "assert", status: "fail", actual: text };
+    expect(renderStepDetailLines(step, 1)).toEqual([
+      `       actual:   "${"a".repeat(299)}😀" … (1,300 more characters)`,
+    ]);
+    // A text at the limit prints whole.
+    expect(renderStepDetailLines({ ...step, actual: "c".repeat(300) }, 1)).toEqual([
+      `       actual:   "${"c".repeat(300)}"`,
+    ]);
+  });
+
   it("renderStepDetailLines prints only the fields a step carries", () => {
     expect(
       renderStepDetailLines({ index: 0, kind: "tap", status: "fail", reason: "no match" }, 1)
