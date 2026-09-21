@@ -170,6 +170,13 @@ export interface DirectiveOutcome {
    */
   refused?: true;
   /**
+   * Qualifies a determinate verdict: the final poll could not read the UI
+   * tree, so the verdict comes from an earlier read. It describes the read,
+   * not what to try, so it is not a `hint`. The runner closes the step's
+   * reason with it; the recorder puts it last in its warning.
+   */
+  note?: string;
+  /**
    * The step passed, but the WAY it passed weakens it as proof — carried into
    * the step report.
    */
@@ -1726,7 +1733,7 @@ async function waitForCondition(
   // 3. Dark tail within the tolerance — a genuine last-poll blip: the trusted
   //    reads still describe the window, so a transient error on the trailing
   //    poll must not flip a clean skip into a hard error. The determinate
-  //    verdict stands, with the failed final read reported as a hint.
+  //    verdict stands, with the failed final read reported as a note.
   const refusal = fetchRefused ? { refused: true as const } : {};
   if (lastTrustedReadAt === undefined) {
     return {
@@ -1768,20 +1775,13 @@ async function waitForCondition(
     }
   }
   // Tier 3 (or a trusted final read): the verdict is determinate; a blip's
-  // failed final read is reported as a hint, not dropped.
-  const verdict = assertReason(
-    step.condition,
-    step.selector,
-    step.expectedText,
-    step.textMatch,
-    lastMatches
-  );
-  const blipNote =
-    !lastReadTrusted && fetchError
-      ? `the final poll could not read the UI tree: ${fetchError}`
-      : undefined;
-  const hint = [verdict.hint, blipNote].filter((h) => h !== undefined).join("; ");
-  return { ok: false, ...verdict, hint: hint || undefined };
+  // failed final read is reported as a note, not dropped.
+  return {
+    ok: false,
+    ...assertReason(step.condition, step.selector, step.expectedText, step.textMatch, lastMatches),
+    ...(!lastReadTrusted &&
+      fetchError && { note: `the final poll could not read the UI tree: ${fetchError}` }),
+  };
 }
 
 // `await: { idle: true }` asks one question a selector condition cannot: has
@@ -2242,7 +2242,7 @@ async function waitForIdle(
   }
   // A tolerated blip is not a silently dropped error: whichever warning below
   // describes the window carries the failed read with it, the way
-  // waitForCondition's hint carries its own. (The tree-only settle cannot be reached
+  // waitForCondition's note carries its own. (The tree-only settle cannot be reached
   // with a failed final read — that read cleared `treeSettledAtLastRead` — so it
   // is left without a note it could never print.)
   const blipNote =

@@ -446,9 +446,8 @@ const MAX_PROBE_REASON_CHARS = 200;
 
 /**
  * How much of the cap goes to the END. {@link probeVerdict} closes a verdict
- * with the outcome's hint, which carries the note that the final poll went
- * dark. That note qualifies the verdict, so elide the middle rather than the
- * tail.
+ * with the note that the final poll went dark. That note qualifies the
+ * verdict, so elide the middle rather than the tail.
  */
 const PROBE_REASON_TAIL_CHARS = 60;
 
@@ -461,6 +460,7 @@ function probeVerdict(outcome: DirectiveOutcome): string {
     outcome.reason ?? "no match",
     outcome.actual !== undefined ? `actual: ${JSON.stringify(outcome.actual)}` : undefined,
     outcome.hint,
+    outcome.note,
   ]
     .filter((part) => part !== undefined)
     .join("; ");

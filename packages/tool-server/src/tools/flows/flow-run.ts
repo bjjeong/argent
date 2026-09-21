@@ -2447,7 +2447,8 @@ async function execLeafStep(
         return {
           ...base,
           status: r.ok ? "pass" : "fail",
-          reason: r.reason,
+          // The note qualifies the verdict, so it closes the reason.
+          reason: r.note === undefined ? r.reason : `${r.reason} (${r.note})`,
           ...(r.warning !== undefined ? { warning: r.warning } : {}),
           ...details,
         };
