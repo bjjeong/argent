@@ -718,6 +718,33 @@ describe("flowRunToMcpContent", () => {
     });
   });
 
+  it("prints a hint that quotes device text with one spelling of its quotes and backslashes", async () => {
+    // The tool-server quotes the own text as JSON, the same spelling as the
+    // `actual:` line. The hint line must not escape it a second time.
+    const blocks = await flowRunToMcpContent({
+      flow: "f",
+      steps: [
+        {
+          index: 0,
+          kind: "assert",
+          status: "fail",
+          reason: 'element matched id="greet" but its text did not equal "Nope"',
+          expected: "Nope",
+          actual: 'Say "hi" C:\\x Hello there',
+          hint: 'the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text',
+        },
+      ],
+    });
+
+    expect(blocks[2]).toEqual({
+      type: "text",
+      text:
+        '  expected: "Nope"\n' +
+        '  actual:   "Say \\"hi\\" C:\\\\x Hello there"\n' +
+        '  hint: the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text',
+    });
+  });
+
   it("renders the new report shape: status glyphs, reasons, directive kinds, and summary", async () => {
     const input: FlowExecuteResult = {
       flow: "checkout",

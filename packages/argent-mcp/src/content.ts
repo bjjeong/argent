@@ -293,10 +293,11 @@ function escapeControls(v: string): string {
  * line of the block.
  */
 function stepDetailText(step: FlowStepResult): string | undefined {
-  // A `hint:` and a snapshot value print unquoted, so their own quotes stay as
-  // they were written; a quoted value escapes its quotes with the rest.
-  const oneLine = (v: string): string => JSON.stringify(v).slice(1, -1).replace(/\\"/g, '"');
-  const value = (v: string): string => (step.kind === "snapshot" ? oneLine(v) : JSON.stringify(v));
+  // A `hint:` and a snapshot value print unquoted, so only their control
+  // characters are escaped. A hint that quotes device text quotes it as JSON
+  // already, so doubling its backslashes here would print a third spelling.
+  const value = (v: string): string =>
+    step.kind === "snapshot" ? escapeControls(v) : JSON.stringify(v);
   // A pattern prints as its source in slash delimiters — the spelling the step
   // line and the reason use — so it can be copied back into `matches:`. JSON
   // quoting would double each backslash, making `\d` a literal backslash.
@@ -307,7 +308,7 @@ function stepDetailText(step: FlowStepResult): string | undefined {
   if (typeof step.expected === "string")
     lines.push(`${indent}expected: ${expected(step.expected)}`);
   if (typeof step.actual === "string") lines.push(`${indent}actual:   ${value(step.actual)}`);
-  if (typeof step.hint === "string") lines.push(`${indent}hint: ${oneLine(step.hint)}`);
+  if (typeof step.hint === "string") lines.push(`${indent}hint: ${escapeControls(step.hint)}`);
   return lines.length > 0 ? lines.join("\n") : undefined;
 }
 

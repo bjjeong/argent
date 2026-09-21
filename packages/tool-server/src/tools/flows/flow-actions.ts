@@ -2388,7 +2388,9 @@ function assertReason(
         actual: capActual(shown),
         ...(own !== "" &&
           own !== shown && {
-            hint: `the element's own text is "${capActual(own)}"; the check accepts the subtree text or the own text`,
+            // JSON-quoted like the `actual:` line, so a quote or a backslash
+            // in the device text cannot end the quoted value early.
+            hint: `the element's own text is ${JSON.stringify(capActual(own))}; the check accepts the subtree text or the own text`,
           }),
       };
     }

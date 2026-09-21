@@ -459,7 +459,7 @@ function elisionMarker(dropped: number): string {
 function probeVerdict(outcome: DirectiveOutcome): string {
   return [
     outcome.reason ?? "no match",
-    outcome.actual !== undefined ? `actual: "${outcome.actual}"` : undefined,
+    outcome.actual !== undefined ? `actual: ${JSON.stringify(outcome.actual)}` : undefined,
     outcome.hint,
   ]
     .filter((part) => part !== undefined)

@@ -298,10 +298,11 @@ export function renderStepDetailLines(s: StepReport, n: number): string[] {
 }
 
 function stepDetailTexts(s: StepReport): string[] {
-  // A `hint:` and a snapshot value print unquoted, so their own quotes stay as
-  // they were written; a quoted value escapes its quotes with the rest.
-  const oneLine = (v: string): string => JSON.stringify(v).slice(1, -1).replace(/\\"/g, '"');
-  const value = (v: string): string => (s.kind === "snapshot" ? oneLine(v) : JSON.stringify(v));
+  // A `hint:` and a snapshot value print unquoted, so only their control
+  // characters are escaped. A hint that quotes device text quotes it as JSON
+  // already, so doubling its backslashes here would print a third spelling.
+  const value = (v: string): string =>
+    s.kind === "snapshot" ? escapeControls(v) : JSON.stringify(v);
   // A pattern prints as its source in slash delimiters — the spelling the step
   // line and the reason use — so it can be copied back into `matches:`. JSON
   // quoting would double each backslash, making `\d` a literal backslash.
@@ -310,7 +311,7 @@ function stepDetailTexts(s: StepReport): string[] {
   const lines: string[] = [];
   if (typeof s.expected === "string") lines.push(`expected: ${expected(s.expected)}`);
   if (typeof s.actual === "string") lines.push(`actual:   ${value(s.actual)}`);
-  if (typeof s.hint === "string") lines.push(`hint: ${oneLine(s.hint)}`);
+  if (typeof s.hint === "string") lines.push(`hint: ${escapeControls(s.hint)}`);
   return lines;
 }
 

@@ -158,6 +158,21 @@ describe("text check failures", () => {
     expect(step).not.toHaveProperty("expectedKind");
   });
 
+  it("quotes an own text that holds quotes and backslashes as JSON, like the actual text", async () => {
+    currentTree = () =>
+      screen([label('Say "hi" C:\\x', { identifier: "greet", subtreeText: "Hello there" })]);
+    await writeFlow("own-text-quotes", {
+      executionPrerequisite: "",
+      steps: [{ ...assertTotalEquals42, selector: { identifier: "greet" } }],
+    });
+
+    const [step] = (await run("own-text-quotes")).steps;
+
+    expect(step.hint).toBe(
+      'the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text'
+    );
+  });
+
   it("caps a long actual text at 300 characters and keeps it out of the reason", async () => {
     const screenText = "Home Cart Checkout Pay Total $41.50 Apply coupon "
       .repeat(50)

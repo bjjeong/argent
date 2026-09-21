@@ -302,6 +302,22 @@ describe("flow report rendering", () => {
     ]);
   });
 
+  it("renderStepDetailLines prints a hint's quoted device text with the actual line's spelling", () => {
+    // The tool-server quotes the own text as JSON. Escaping the hint again
+    // doubled its backslashes and left its quotes raw: neither spelling.
+    const step: StepReport = {
+      index: 0,
+      kind: "assert",
+      status: "fail",
+      actual: 'Say "hi" C:\\x Hello there',
+      hint: 'the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text',
+    };
+    expect(renderStepDetailLines(step, 1)).toEqual([
+      '       actual:   "Say \\"hi\\" C:\\\\x Hello there"',
+      '       hint: the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text',
+    ]);
+  });
+
   it("renderStepDetailLines prints a pattern in slash delimiters, backslashes intact", () => {
     // The step line one row above prints the same pattern as /^Taps: \d\d\d$/.
     // JSON quoting doubled every backslash here, so the printed pattern matched
