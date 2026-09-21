@@ -1566,6 +1566,7 @@ async function execWhenStep(
         ...marker,
         status: "error",
         reason: `could not resolve when guard (${label}): ${guard.reason}`,
+        durationMs: Date.now() - guardStartedAt,
       });
       state.stopped = true;
       reportBlockSkipped(state, step.steps, inner, "when guard errored");

@@ -788,6 +788,8 @@ describe("output references in steps", () => {
     expect(result.steps[0].kind).toBe("when");
     expect(result.steps[0].status).toBe("error");
     expect(result.steps[0].reason).toMatch(/^could not resolve when guard \(/);
+    // A guard that ran is timed, as when it errors on the tree read.
+    expect(result.steps[0].durationMs).toEqual(expect.any(Number));
     expect(result.steps[0].reason).toContain(
       "`when.visible.id`: {{output:row}} did not resolve: `output` has no `row` (it has no keys)"
     );
