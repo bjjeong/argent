@@ -1671,6 +1671,9 @@ async function waitForCondition(
   // Whether the last read attempt was refused (see DirectiveOutcome.refused).
   // Assigned on every pass, like `lastReadTrusted`.
   let fetchRefused: boolean;
+  // The reader's own repair, when the last read came back blind with one.
+  // `tap` and `idle` pass it on the same way.
+  let blindHint: string | undefined;
   let everMatched = false;
   // Date.now() of the most recent TRUSTED read — undefined until one lands.
   // Post-loop it anchors the dark-tail measurement.
@@ -1689,6 +1692,7 @@ async function waitForCondition(
       fetchRefused = false;
       everMatched ||= lastMatches.length > 0;
       const blind = isBlindRead(data, everMatched);
+      blindHint = blind ? data.hint : undefined;
       if (!blind) lastTrustedReadAt = Date.now();
       lastReadTrusted = !blind;
       if (
@@ -1700,6 +1704,7 @@ async function waitForCondition(
     } catch (err) {
       fetchError = err instanceof Error ? err.message : String(err);
       fetchRefused = getFailureSignal(err)?.error_kind === "validation";
+      blindHint = undefined;
       // A throw is as blind as an empty tree — `lastMatches` still holds the
       // previous successful read, which must not pass for current evidence.
       lastReadTrusted = false;
@@ -1734,12 +1739,15 @@ async function waitForCondition(
   //    reads still describe the window, so a transient error on the trailing
   //    poll must not flip a clean skip into a hard error. The determinate
   //    verdict stands, with the failed final read reported as a note.
-  const refusal = fetchRefused ? { refused: true as const } : {};
+  const unread = {
+    ...(fetchRefused && { refused: true as const }),
+    ...(blindHint !== undefined && { hint: blindHint }),
+  };
   if (lastTrustedReadAt === undefined) {
     return {
       ok: false,
       indeterminate: true,
-      ...refusal,
+      ...unread,
       reason: fetchError
         ? `could not read the UI tree: ${fetchError}`
         : "could not evaluate the condition — every read of the UI tree was empty or degraded",
@@ -1756,7 +1764,7 @@ async function waitForCondition(
       return {
         ok: false,
         indeterminate: true,
-        ...refusal,
+        ...unread,
         reason: fetchError
           ? `could not confirm the element is hidden — it was visible earlier, but the last UI read failed: ${fetchError}`
           : "could not confirm the element is hidden — it was visible earlier, but the last UI reads were empty",
@@ -1767,7 +1775,7 @@ async function waitForCondition(
       return {
         ok: false,
         indeterminate: true,
-        ...refusal,
+        ...unread,
         reason: fetchError
           ? `could not evaluate the condition — the UI tree was unreadable for the final ${darkTailMs}ms of the window: ${fetchError}`
           : `could not evaluate the condition — the UI tree reads were empty or degraded for the final ${darkTailMs}ms of the window`,

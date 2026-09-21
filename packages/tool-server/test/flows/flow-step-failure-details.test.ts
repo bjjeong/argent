@@ -120,6 +120,40 @@ describe("selector misses on a screen that was never read", () => {
     expect(step).toMatchObject({ status: "fail", indeterminate: true, hint: INDETERMINATE_HINT });
   }, 20_000);
 
+  it("gives an assert, an await and a when guard the reader's repair too", async () => {
+    currentTree = () => screen([]);
+    currentFlags = { hint: VEGA_HINT };
+    await writeFlow("blind-assert", {
+      executionPrerequisite: "",
+      steps: [{ kind: "assert", condition: "visible", selector: { text: "Home" } }],
+    });
+    await writeFlow("blind-await-hint", {
+      executionPrerequisite: "",
+      steps: [{ kind: "await", condition: "visible", selector: { text: "Home" }, timeout: 500 }],
+    });
+    await writeFlow("blind-when", {
+      executionPrerequisite: "",
+      steps: [
+        {
+          kind: "when",
+          condition: { kind: "ui", condition: "visible", selector: { text: "Home" } },
+          steps: [{ kind: "tap", selector: { text: "Home" } }],
+        },
+      ],
+    });
+
+    const runs = await Promise.all([
+      run("blind-assert"),
+      run("blind-await-hint"),
+      run("blind-when"),
+    ]);
+
+    for (const { steps } of runs) {
+      expect(steps[0]).toMatchObject({ indeterminate: true, hint: VEGA_HINT });
+      expect(steps[0].reason).toMatch(/every read of the UI tree was empty or degraded/);
+    }
+  }, 20_000);
+
   it("still reports a genuinely empty screen as one, with the scroll-to hint", async () => {
     // Same empty tree, no reader flags: the read IS evidence about the screen.
     currentTree = () => screen([]);
