@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Registry, ToolContext } from "@argent/registry";
+import { FAILURE_CODES, FailureError, type Registry, type ToolContext } from "@argent/registry";
 import type { DescribeNode, DescribeTreeData } from "../../src/tools/describe/contract";
 import type { PixelFrame } from "../../src/tools/flows/flow-pixels";
 
@@ -886,6 +886,32 @@ steps:
     // An indeterminate readiness check stops the run rather than recording a
     // regression the app never had.
     expect(r.steps.at(-1)!.status).toBe("skip");
+  });
+
+  // A read refused with a `validation` failure is refused again on every re-run
+  // (here: the flow reads an Apple system app). The check did not run, so the
+  // step still errors, but it is not flagged as one to run again — the rule an
+  // `assert` on the same read follows.
+  it("does not flag a refused read for a re-run", async () => {
+    currentTree = () => {
+      throw new FailureError("com.apple.Preferences is an Apple system app", {
+        error_code: FAILURE_CODES.NATIVE_DEVTOOLS_NOT_INJECTABLE,
+        failure_stage: "flow_tree_pinned_target",
+        failure_area: "tool_server",
+        error_kind: "validation",
+      });
+    };
+    await writeFlow(
+      "refused",
+      `executionPrerequisite: ""
+steps:
+  - await: { idle: true, timeout: 900, stableFor: 0 }
+`
+    );
+    const [step] = (await run("refused")).steps;
+    expect(step!.status).toBe("error");
+    expect(step!.reason).toContain("is an Apple system app");
+    expect(step).not.toHaveProperty("indeterminate");
   });
 
   // A blip mid-settle is expected — the hold restarts from the next good read

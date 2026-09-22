@@ -209,6 +209,11 @@ export interface DirectiveOutcome extends StepDetails {
   warning?: string;
 }
 
+/** Whether a failed tree read was refused (see {@link DirectiveOutcome.refused}). */
+function isRefusedRead(err: unknown): boolean {
+  return getFailureSignal(err)?.error_kind === "validation";
+}
+
 /**
  * The uniform outcome for a step cut short by run cancellation (directives
  * here, `launch` in flow-run.ts). The runner reports it as a skip — an aborted
@@ -1733,7 +1738,7 @@ async function waitForCondition(
       }
     } catch (err) {
       fetchError = err instanceof Error ? err.message : String(err);
-      fetchRefused = getFailureSignal(err)?.error_kind === "validation";
+      fetchRefused = isRefusedRead(err);
       blindHint = undefined;
       // A throw is as blind as an empty tree — `lastMatches` still holds the
       // previous successful read, which must not pass for current evidence.
@@ -1993,10 +1998,10 @@ async function waitForIdle(
   // Definitely assigned: the loop below always completes at least one round,
   // and every arm of that round sets it.
   let lastRead!: TreeReadOutcome;
-  let treeErrorMessage: string | undefined;
+  let treeError: Error | undefined;
   // Whether the last read that CAME BACK was a degraded one, and the repair it
   // named if it named one. Both are cleared by a read that carried a tree and
-  // survive an abandoned one, exactly as treeErrorMessage does, so a degraded
+  // survive an abandoned one, exactly as treeError does, so a degraded
   // tail is not thrown away by a closing round that merely ran out of budget.
   // `should_restart` arrives without a hint, so the flag cannot be inferred from
   // the message.
@@ -2086,7 +2091,7 @@ async function waitForIdle(
       // presence on the LAST read is reportable.
       lastRead = "error";
       darkReads += 1;
-      treeErrorMessage = read.error;
+      treeError = read.cause;
       treeSignature = undefined;
       previousFrame = undefined;
       treeSince = 0;
@@ -2098,7 +2103,7 @@ async function waitForIdle(
       lastRead = "value";
       readsSucceeded += 1;
       darkReads = 0;
-      treeErrorMessage = undefined;
+      treeError = undefined;
       treeReadBlind = false;
       blindHint = undefined;
       // It answered, so whatever wedged it has cleared.
@@ -2199,10 +2204,11 @@ async function waitForIdle(
 
   // An unreadable window is never a verdict about the app. Which flavour of
   // unreadable it was decides the repair, so they stay apart.
-  const unreadable = (underlying: string): DirectiveOutcome => ({
+  const unreadable = (underlying: Error): DirectiveOutcome => ({
     ok: false,
     indeterminate: true,
-    reason: `could not read the UI tree while waiting for the screen to settle: ${underlying}`,
+    ...(isRefusedRead(underlying) && { refused: true as const }),
+    reason: `could not read the UI tree while waiting for the screen to settle: ${underlying.message}`,
     // The underlying reader reports an instrumentation failure, whose remedy
     // (relaunch the app) is the wrong repair for the commonest cause here: the
     // app is simply not in the foreground, which reads exactly the same from the
@@ -2225,7 +2231,7 @@ async function waitForIdle(
   });
 
   if (readsSucceeded === 0) {
-    if (treeErrorMessage !== undefined) return unreadable(treeErrorMessage);
+    if (treeError !== undefined) return unreadable(treeError);
     if (treeReadBlind) return degraded();
     return {
       ok: false,
@@ -2248,10 +2254,10 @@ async function waitForIdle(
   // The tail is what decides, NOT how its last round happened to end: a round
   // that runs out of budget mid-read ends as a `timeout` however dead the source
   // is, so requiring `error` here would discard the whole accumulated tail.
-  // `treeErrorMessage` survives an abandoned read and is cleared by a successful
-  // one, so it means exactly "the last read that came back did so as a failure".
-  if (treeErrorMessage !== undefined && darkReads > IDLE_TOLERATED_DARK_READS) {
-    return unreadable(treeErrorMessage);
+  // `treeError` survives an abandoned read and is cleared by a successful one,
+  // so it means exactly "the last read that came back did so as a failure".
+  if (treeError !== undefined && darkReads > IDLE_TOLERATED_DARK_READS) {
+    return unreadable(treeError);
   }
   // A degraded tail is the same window, reached the other way: the reads kept
   // arriving and kept saying nothing about the app. One is a blip like any other
@@ -2282,9 +2288,7 @@ async function waitForIdle(
   // with a failed final read — that read cleared `treeSettledAtLastRead` — so it
   // is left without a note it could never print.)
   const blipNote =
-    treeErrorMessage !== undefined
-      ? ` (the last read that came back failed: ${treeErrorMessage})`
-      : "";
+    treeError !== undefined ? ` (the last read that came back failed: ${treeError.message})` : "";
 
   // Readable throughout and never once carrying content: the screen rendered
   // nothing, which is not the same claim as "it never stopped moving".
