@@ -1,5 +1,5 @@
 import type { DeviceInfo, Registry, ToolContext } from "@argent/registry";
-import { getFailureSignal } from "@argent/registry";
+import { getFailureSignal, printCapped } from "@argent/registry";
 import {
   getDescribeTapPoint,
   type DescribeFrame,
@@ -144,8 +144,31 @@ export interface ActionEnv {
   treeOutage?: { proven?: { deviceId: string; error: Error } };
 }
 
+/**
+ * What a step that did not pass found, wanted and advises, kept beside its
+ * reason rather than inside it. The step report carries these fields as they
+ * are, and the CLI and the MCP client print them under the step's line.
+ */
+export interface StepDetails {
+  /**
+   * What to try first about a step that did not pass, or a fact that helps
+   * choose the fix (for example the element's own text).
+   */
+  hint?: string;
+  expected?: string;
+  actual?: string;
+  /**
+   * `expected` holds a regex source, not a value to compare literally. The
+   * renderers print it in slash delimiters, the spelling the step line and the
+   * reason already use for a pattern (see `describeTextExpectation`); without
+   * the marker they quote it as a literal and every backslash doubles, so the
+   * printed form is a valid-looking pattern that means something else.
+   */
+  expectedKind?: "pattern";
+}
+
 /** Outcome of a selector directive: ok, or a machine-readable reason it failed. */
-export interface DirectiveOutcome {
+export interface DirectiveOutcome extends StepDetails {
   ok: boolean;
   reason?: string;
   /** The run was cancelled mid-step — reported as a skip, not a step failure. */
@@ -184,32 +207,6 @@ export interface DirectiveOutcome {
    * the step report.
    */
   warning?: string;
-  hint?: string;
-  expected?: string;
-  actual?: string;
-  /**
-   * `expected` holds a regex source, not a value to compare literally. The
-   * renderers print it in slash delimiters, the spelling the step line and the
-   * reason already use for a pattern (see `describeTextExpectation`); without
-   * the marker they quote it as a literal and every backslash doubles, so the
-   * printed form is a valid-looking pattern that means something else.
-   */
-  expectedKind?: "pattern";
-}
-
-const MAX_QUOTED_CHARS = 300;
-
-/**
- * Device text JSON-quoted for a hint, cut to its first 300 characters. The
- * count of the rest follows outside the quotes, so the cut never reads as
- * device text. A step's `actual` keeps the whole text; only prose is cut here.
- * Counted in code points, so the cut never splits a surrogate pair.
- */
-function quoteCapped(text: string): string {
-  const chars = Array.from(text);
-  if (chars.length <= MAX_QUOTED_CHARS) return JSON.stringify(text);
-  const rest = (chars.length - MAX_QUOTED_CHARS).toLocaleString("en-US");
-  return `${JSON.stringify(chars.slice(0, MAX_QUOTED_CHARS).join(""))} … (${rest} more characters)`;
 }
 
 /**
@@ -903,6 +900,18 @@ async function scrollToVisible(
   };
 }
 
+/**
+ * Closes the reason of a step whose every read came back empty and flagged by
+ * the tree source: the screen was never read, so the step judged nothing.
+ */
+const NOT_THE_APP =
+  "this is the reader reporting it could not see the app, not the app rendering nothing";
+
+/** One wording for a selector that matched nothing, whether a gesture or a check says it. */
+function noMatchReason(sel: string): string {
+  return `no element matched selector ${sel}`;
+}
+
 // `tap`/`type` auto-wait but deliberately do NOT auto-scroll: an implicit
 // scroll would widen a loose selector's match scope from the viewport to the
 // whole page, mutate scroll state even when the step fails, and stretch a
@@ -927,15 +936,13 @@ export function selectorMiss({
   if (blind) {
     return {
       indeterminate: true,
-      reason:
-        `the UI tree read back empty and degraded, so ${sel} was never looked for — this is the ` +
-        `reader reporting it could not see the app, not the app rendering nothing`,
+      reason: `the UI tree read back empty and degraded, so ${sel} was never looked for — ${NOT_THE_APP}`,
       ...(blind.hint !== undefined && { hint: blind.hint }),
     };
   }
   if (matched === 0) {
     return {
-      reason: `no element matched selector ${sel}`,
+      reason: noMatchReason(sel),
       hint: "if it is off-screen, add a scroll-to step before this one",
     };
   }
@@ -1762,19 +1769,22 @@ async function waitForCondition(
   //    verdict stands. A final read that threw is reported as a note; one that
   //    came back empty or degraded has no error to report, so the verdict
   //    stands without one.
-  const unread = {
+  //
+  // Every indeterminate return goes through this, so none drops the refusal or
+  // the reader's repair.
+  const unjudged = (reason: string): DirectiveOutcome => ({
+    ok: false,
+    indeterminate: true,
     ...(fetchRefused && { refused: true as const }),
     ...(blindHint !== undefined && { hint: blindHint }),
-  };
+    reason,
+  });
   if (lastTrustedReadAt === undefined) {
-    return {
-      ok: false,
-      indeterminate: true,
-      ...unread,
-      reason: fetchError
+    return unjudged(
+      fetchError
         ? `could not read the UI tree: ${fetchError}`
-        : "could not evaluate the condition — every read of the UI tree was empty or degraded",
-    };
+        : "could not evaluate the condition — every read of the UI tree was empty or degraded"
+    );
   }
   if (!lastReadTrusted) {
     // `hidden` with an evidence gap: the element matched on an earlier trusted
@@ -1784,25 +1794,19 @@ async function waitForCondition(
     // loop, so a trusted final read falls through to the determinate "still
     // visible" below with `lastMatches` fresh from that read.
     if (step.condition === "hidden") {
-      return {
-        ok: false,
-        indeterminate: true,
-        ...unread,
-        reason: fetchError
+      return unjudged(
+        fetchError
           ? `could not confirm the element is hidden — it was visible earlier, but the last UI read failed: ${fetchError}`
-          : "could not confirm the element is hidden — it was visible earlier, but the last UI reads were empty",
-      };
+          : "could not confirm the element is hidden — it was visible earlier, but the last UI reads were empty"
+      );
     }
     const darkTailMs = Date.now() - lastTrustedReadAt;
     if (darkTailMs > CONDITION_DARK_TAIL_TOLERANCE_MS) {
-      return {
-        ok: false,
-        indeterminate: true,
-        ...unread,
-        reason: fetchError
+      return unjudged(
+        fetchError
           ? `could not evaluate the condition — the UI tree was unreadable for the final ${darkTailMs}ms of the window: ${fetchError}`
-          : `could not evaluate the condition — the UI tree reads were empty or degraded for the final ${darkTailMs}ms of the window`,
-      };
+          : `could not evaluate the condition — the UI tree reads were empty or degraded for the final ${darkTailMs}ms of the window`
+      );
     }
   }
   // Tier 3 (or a trusted final read): the verdict is determinate; a blip's
@@ -2214,8 +2218,7 @@ async function waitForIdle(
     indeterminate: true,
     reason:
       `the UI tree read back empty and degraded while waiting for the screen to settle, so the ` +
-      `screen was never observed — this is the reader reporting it could not see the app, not ` +
-      `the app rendering nothing`,
+      `screen was never observed — ${NOT_THE_APP}`,
     hint: blindHint,
   });
 
@@ -2386,17 +2389,17 @@ function assertReason(
   expectedText: string | undefined,
   textMatch: TextMatchMode | undefined,
   matches: ReturnType<typeof findAll>
-): Pick<DirectiveOutcome, "reason" | "expected" | "actual" | "hint" | "expectedKind"> {
+): Pick<DirectiveOutcome, "reason"> & StepDetails {
   const sel = describeSelector(selector);
   switch (condition) {
     case "exists":
-      return { reason: `no element matched selector ${sel}` };
+      return { reason: noMatchReason(sel) };
     case "visible":
       return {
         reason:
           matches.length > 0
             ? `element(s) matched ${sel} but none was visible (zero-area frame)`
-            : `no element matched selector ${sel}`,
+            : noMatchReason(sel),
       };
     case "hidden":
       // Reached only when the final read was trusted (waitForCondition returns
@@ -2406,7 +2409,7 @@ function assertReason(
       return { reason: `an element matching ${sel} was still visible` };
     case "text": {
       const first = firstInReadingOrder(matches.filter(isVisible)) ?? firstInReadingOrder(matches);
-      if (!first) return { reason: `no element matched selector ${sel}` };
+      if (!first) return { reason: noMatchReason(sel) };
       const wanted = describeTextExpectation(expectedText, textMatch, "infinitive");
       // The check accepts the element's own label/value as well as its hoisted
       // subtree text (see evaluateCondition), so name both when they differ.
@@ -2419,9 +2422,10 @@ function assertReason(
         actual: shown,
         ...(own !== "" &&
           own !== shown && {
-            // JSON-quoted like the `actual:` line, so a quote or a backslash
-            // in the device text cannot end the quoted value early.
-            hint: `the element's own text is ${quoteCapped(own)}; the check accepts the subtree text or the own text`,
+            // JSON-quoted and cut like the `actual:` line, so a quote or a
+            // backslash in the device text cannot end the quoted value early.
+            // A step's `actual` keeps the whole text; only this prose is cut.
+            hint: `the element's own text is ${printCapped(own, JSON.stringify)}; the check accepts the subtree text or the own text`,
           }),
       };
     }

@@ -8,7 +8,9 @@ import {
   getResolvedToolsUrl,
   isArtifactHandle,
   materializeArtifacts,
+  renderFlowStepDetails,
   ToolInvocationError,
+  type FlowStepDetails,
   type MaterializeContext,
   type ToolsClient,
   type ToolsServerPaths,
@@ -20,23 +22,13 @@ export interface FlowCommandOptions {
   paths: ToolsServerPaths;
 }
 
-export interface StepReport {
+export interface StepReport extends FlowStepDetails {
   index: number;
   kind: string;
   status: "pass" | "fail" | "skip" | "error";
   reason?: string;
   /** Set by the tool-server on a step that PASSED in a way that weakens it as proof. */
   warning?: string;
-  hint?: string;
-  expected?: string;
-  actual?: string;
-  /**
-   * Set by the tool-server when `expected` holds a regex source rather than a
-   * value to compare literally.
-   */
-  expectedKind?: "pattern";
-  /** Set by the tool-server when the step could not read the UI tree to do its check. */
-  indeterminate?: true;
   tool?: string;
   flow?: string;
   message?: string;
@@ -277,81 +269,28 @@ export function renderUnderStepLine(s: StepReport, n: number, text: string): str
 }
 
 /**
- * Characters that print as nothing, or as a plain space: control characters
- * (C0, DEL, C1), format characters (zero-width, bidi), line and paragraph
- * separators, and each space that is not U+0020 (for example NBSP, or the
- * U+202F in iOS's `10:30 AM`). A value that differs from another only by one of
- * these must not print as its twin.
+ * A step's line and the lines under it: its warning, its detail lines and its
+ * script output. Every renderer prints a step through this, so a line added
+ * under a step reaches the buffered report, a batch's failed steps and the
+ * live output alike. The buffered renderers follow it with the step's artifact
+ * paths (renderStepArtifactLines); the live one prints each step before any
+ * path exists, and lists them at the end instead (renderArtifactLines).
  */
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu;
-
-const MAX_ACTUAL_CHARS = 300;
-
-/**
- * An `actual:` value cut to its first 300 characters, with the count of the
- * rest after it, outside the quotes. The report keeps the whole found text;
- * the cut is only for the line, so it never reads as device text. Counted in
- * code points, so the cut never splits a surrogate pair.
- */
-function capped(v: string, print: (v: string) => string): string {
-  const chars = Array.from(v);
-  if (chars.length <= MAX_ACTUAL_CHARS) return print(v);
-  const rest = (chars.length - MAX_ACTUAL_CHARS).toLocaleString("en-US");
-  return `${print(chars.slice(0, MAX_ACTUAL_CHARS).join(""))} … (${rest} more characters)`;
+export function renderStepLines(s: StepReport, n: number, topFlow: string): string[] {
+  const lines = [renderStepLine(s, n, topFlow)];
+  if (s.warning) lines.push(renderUnderStepLine(s, n, `⚠ ${s.warning}`));
+  for (const text of renderFlowStepDetails(s)) lines.push(renderUnderStepLine(s, n, text));
+  lines.push(...renderScriptLogLines(s, n));
+  return lines;
 }
 
-/**
- * Escape only the invisible characters of a value, each in its JSON spelling
- * (`\n`, `\t`, `\u0007`, `\u00a0`). Everything else — a backslash above all —
- * stays as the device reported it.
- */
-function escapeInvisible(v: string): string {
-  return v.replace(INVISIBLE, (c) => {
-    const json = JSON.stringify(c).slice(1, -1);
-    if (json !== c) return json;
-    let escaped = "";
-    for (let i = 0; i < c.length; i++) {
-      escaped += `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`;
-    }
-    return escaped;
-  });
-}
-
-/**
- * The `expected:`, `actual:`, `indeterminate:` and `hint:` lines of a step. The
- * tool-server sets these fields only on a step that did not pass, so a passing
- * step prints none; the status itself is not checked here.
- *
- * An invisible character is ESCAPED, never replaced: these lines are the only
- * place the found text is printed, and a value that differs from the expected
- * one only by a line break, a tab or a no-break space has to look different
- * here — replacing it with a space printed the two as twins. The escape keeps
- * each value on one line and keeps a raw escape sequence out of the terminal.
- */
-export function renderStepDetailLines(s: StepReport, n: number): string[] {
-  return stepDetailTexts(s).map((text) => renderUnderStepLine(s, n, text));
-}
-
-function stepDetailTexts(s: StepReport): string[] {
-  // A `hint:` and a snapshot value print unquoted, so only their invisible
-  // characters are escaped. A hint that quotes device text quotes it as JSON
-  // already, so doubling its backslashes here would print a third spelling.
-  // JSON quoting escapes only C0 controls, so a quoted value is escaped too.
-  const value = (v: string): string =>
-    escapeInvisible(s.kind === "snapshot" ? v : JSON.stringify(v));
-  // A pattern prints as its source in slash delimiters — the spelling the step
-  // line and the reason use. The text between the slashes is the `matches:`
-  // value. JSON quoting would double each backslash, making `\d` a literal
-  // backslash.
-  const expected = (v: string): string =>
-    s.expectedKind === "pattern" ? `/${escapeInvisible(v)}/` : value(v);
+function renderStepArtifactLines(s: StepReport, n: number): string[] {
   const lines: string[] = [];
-  if (typeof s.expected === "string") lines.push(`expected: ${expected(s.expected)}`);
-  if (typeof s.actual === "string") lines.push(`actual:   ${capped(s.actual, value)}`);
-  // The JSON outputs carry the flag; without this line a reader of the text
-  // can tell a check that never ran only from the prose of its reason.
-  if (s.indeterminate === true) lines.push("indeterminate: the check did not run");
-  if (typeof s.hint === "string") lines.push(`hint: ${escapeInvisible(s.hint)}`);
+  if (s.artifacts && typeof s.artifacts === "object") {
+    for (const [k, v] of Object.entries(s.artifacts)) {
+      if (typeof v === "string") lines.push(renderUnderStepLine(s, n, `${k}: ${v}`));
+    }
+  }
   return lines;
 }
 
@@ -432,26 +371,17 @@ export function renderFailedSteps(report: FlowReport): string[] {
   for (const s of report.steps) {
     if (s.kind === "echo") continue;
     n++;
-    const scriptLog = renderScriptLogLines(s, n);
     const scriptNote = s.kind === "script" && Boolean(s.reason);
     if (
       s.status !== "fail" &&
       s.status !== "error" &&
       !s.warning &&
       !scriptNote &&
-      scriptLog.length === 0
+      renderScriptLogLines(s, n).length === 0
     ) {
       continue;
     }
-    lines.push(renderStepLine(s, n, report.flow));
-    if (s.warning) lines.push(renderUnderStepLine(s, n, `⚠ ${s.warning}`));
-    lines.push(...renderStepDetailLines(s, n));
-    lines.push(...scriptLog);
-    if (s.artifacts && typeof s.artifacts === "object") {
-      for (const [k, v] of Object.entries(s.artifacts)) {
-        if (typeof v === "string") lines.push(renderUnderStepLine(s, n, `${k}: ${v}`));
-      }
-    }
+    lines.push(...renderStepLines(s, n, report.flow), ...renderStepArtifactLines(s, n));
   }
   return lines;
 }
@@ -491,7 +421,7 @@ export function summarizeFailure(report: FlowReport): Pick<FailedFlow, "headline
     if (s.kind === "echo") continue;
     n++;
     if (s.status === "fail" || s.status === "error") {
-      const lines = [...(s.reason ? [String(s.reason)] : []), ...stepDetailTexts(s)];
+      const lines = [...(s.reason ? [String(s.reason)] : []), ...renderFlowStepDetails(s)];
       const detail = lines.length > 0 ? lines.join("\n") : undefined;
       return { headline: `step ${n} ${stepLabel(s, report.flow)}`, detail };
     }
@@ -936,15 +866,7 @@ export function renderReport(report: FlowReport): string {
       continue;
     }
     n++;
-    lines.push(renderStepLine(s, n, report.flow));
-    if (s.warning) lines.push(renderUnderStepLine(s, n, `⚠ ${s.warning}`));
-    lines.push(...renderStepDetailLines(s, n));
-    lines.push(...renderScriptLogLines(s, n));
-    if (s.artifacts && typeof s.artifacts === "object") {
-      for (const [k, v] of Object.entries(s.artifacts)) {
-        if (typeof v === "string") lines.push(renderUnderStepLine(s, n, `${k}: ${v}`));
-      }
-    }
+    lines.push(...renderStepLines(s, n, report.flow), ...renderStepArtifactLines(s, n));
   }
   lines.push(...renderSingleFailure(report));
   lines.push(`\n${renderSummary(report)}`);
@@ -1672,10 +1594,7 @@ export async function flow(argv: string[], options: FlowCommandOptions): Promise
       return;
     }
     liveIndex++;
-    console.log(renderStepLine(s, liveIndex, flowName));
-    if (s.warning) console.log(renderUnderStepLine(s, liveIndex, `⚠ ${s.warning}`));
-    for (const line of renderStepDetailLines(s, liveIndex)) console.log(line);
-    for (const line of renderScriptLogLines(s, liveIndex)) console.log(line);
+    for (const line of renderStepLines(s, liveIndex, flowName)) console.log(line);
   };
 
   let report: FlowReport;

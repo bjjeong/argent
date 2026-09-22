@@ -11,6 +11,7 @@ import {
   selectorMiss,
   type ActionEnv,
   type DirectiveOutcome,
+  type StepDetails,
 } from "./flow-actions";
 import { authoringPlatform, describeSelector, type FlowSelector } from "./flow-utils";
 import { diffPngFiles } from "../screenshot-diff/screenshot-diff";
@@ -32,10 +33,7 @@ export interface SnapshotArtifacts {
   diff?: ArtifactHandle;
 }
 
-interface VisualOutcome extends Pick<
-  DirectiveOutcome,
-  "hint" | "expected" | "actual" | "indeterminate"
-> {
+interface VisualOutcome extends StepDetails, Pick<DirectiveOutcome, "indeterminate"> {
   status: "pass" | "fail" | "skip";
   reason?: string;
   /**

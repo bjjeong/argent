@@ -1,3 +1,4 @@
+import type { StepDetails } from "./flow-actions";
 import type { StepStatus } from "./flow-run";
 
 /**
@@ -23,28 +24,21 @@ import type { StepStatus } from "./flow-run";
 const FLOW_EXECUTE_TOOL_ID = "flow-execute";
 const RUN_SEQUENCE_TOOL_ID = "run-sequence";
 
-interface NestedOutcome {
+/**
+ * Beside the status and reason: the detail fields of the inner step that
+ * failed, carried onto the outer step. A failed check keeps the text it found,
+ * and the advice about it, beside its reason rather than inside it — so an
+ * outer step built from the inner `reason` alone would say "did not equal"
+ * with no found text, or "no element matched" with no advice, and nothing else
+ * in the run prints the inner step.
+ */
+interface NestedOutcome extends StepDetails {
   status: StepStatus;
   reason: string;
-  /**
-   * The detail fields of the inner step that failed, carried onto the outer
-   * step. A failed check keeps the text it found, and the advice about it,
-   * beside its reason rather than inside it — so an outer step built from the
-   * inner `reason` alone would say "did not equal" with no found text, or
-   * "no element matched" with no advice, and nothing else in the run prints
-   * the inner step.
-   */
-  hint?: string;
-  expected?: string;
-  actual?: string;
-  expectedKind?: "pattern";
   indeterminate?: true;
 }
 
-type NestedDetails = Pick<
-  NestedOutcome,
-  "hint" | "expected" | "actual" | "expectedKind" | "indeterminate"
->;
+type NestedDetails = Omit<NestedOutcome, "status" | "reason">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

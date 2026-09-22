@@ -6,7 +6,7 @@ import {
   renderSummary,
   renderArtifactLines,
   renderUnderStepLine,
-  renderStepDetailLines,
+  renderStepLines,
   renderFailedSteps,
   renderBatchSummary,
   renderFailedFlows,
@@ -87,7 +87,7 @@ describe("flow report rendering", () => {
         continue;
       }
       n++;
-      live.push(renderStepLine(s, n, report.flow));
+      live.push(...renderStepLines(s, n, report.flow));
     }
 
     // Every live line appears verbatim in the buffered output (which adds the
@@ -251,7 +251,9 @@ describe("flow report rendering", () => {
     }
   });
 
-  it("renderStepDetailLines prints expected, actual and hint under the label, values quoted and aligned", () => {
+  it("renderStepLines prints expected, actual and hint under the label, values quoted and aligned", () => {
+    // How each value is spelled is the shared renderer's (tools-client); this
+    // pins where the CLI puts the lines.
     const step: StepReport = {
       index: 0,
       kind: "assert",
@@ -262,17 +264,18 @@ describe("flow report rendering", () => {
       actual: "$10.00",
       hint: "the cart may still be loading",
     };
-    const lines = renderStepDetailLines(step, 3);
+    const lines = renderStepLines(step, 3, "f");
     expect(lines).toEqual([
+      '  ✗  3 assert text "Total" — text did not match',
       '       expected: "$12.00"',
       '       actual:   "$10.00"',
       "       hint: the cart may still be loading",
     ]);
-    expect(lines[0]!.indexOf('"')).toBe(lines[1]!.indexOf('"'));
-    expect(lines[0]!.indexOf("expected")).toBe(renderStepLine(step, 3, "f").indexOf("assert"));
+    expect(lines[1]!.indexOf('"')).toBe(lines[2]!.indexOf('"'));
+    expect(lines[1]!.indexOf("expected")).toBe(lines[0]!.indexOf("assert"));
   });
 
-  it("renderStepDetailLines stays under the label when nested and past step 99", () => {
+  it("renderStepLines keeps the detail lines under the label when nested and past step 99", () => {
     // The number column widens at 100+ and the label shifts with depth; each
     // detail line has to move with both.
     const step: StepReport = {
@@ -287,214 +290,23 @@ describe("flow report rendering", () => {
     };
     for (const n of [3, 100, 1000]) {
       for (const depth of [undefined, 1, 2]) {
-        const nested = { ...step, depth };
-        const labelCol = renderStepLine(nested, n, "f").indexOf("assert");
-        const lines = renderStepDetailLines(nested, n);
-        expect(lines).toHaveLength(4);
-        expect(lines[0]!.indexOf("expected")).toBe(labelCol);
-        for (const line of lines) expect(line.search(/\S/)).toBe(labelCol);
+        const [label, ...details] = renderStepLines({ ...step, depth }, n, "f");
+        const labelCol = label!.indexOf("assert");
+        expect(details).toHaveLength(4);
+        for (const line of details) expect(line.search(/\S/)).toBe(labelCol);
       }
     }
-    expect(renderStepLine({ ...step, depth: 2 }, 1000, "f")).toBe(
-      '  ✗ 1000     assert text "Total"'
-    );
-    expect(renderStepDetailLines({ ...step, depth: 2 }, 1000)).toEqual([
+    expect(renderStepLines({ ...step, depth: 2 }, 1000, "f")).toEqual([
+      '  ✗ 1000     assert text "Total"',
       '             expected: "$12.00"',
       '             actual:   "$10.00"',
       "             indeterminate: the check did not run",
       "             hint: wait for the cart",
     ]);
-    expect(renderStepLine({ ...step, depth: 1 }, 100, "f")).toBe('  ✗ 100   assert text "Total"');
-    expect(renderStepDetailLines({ ...step, depth: 1 }, 100)[0]).toBe(
-      '          expected: "$12.00"'
-    );
-  });
-
-  it("renderStepDetailLines escapes control characters in values and the hint", () => {
-    const text: StepReport = {
-      index: 0,
-      kind: "assert",
-      status: "fail",
-      expected: "line one\nline two",
-      actual: "tab\there\u001b[31m",
-      hint: 'wait\r\nthen\tretry\u001b, own text "Total"',
-    };
-    const lines = renderStepDetailLines(text, 1);
-    expect(lines).toEqual([
-      '       expected: "line one\\nline two"',
-      '       actual:   "tab\\there\\u001b[31m"',
-      // The hint prints unquoted, so its own quotes are not escaped.
-      '       hint: wait\\r\\nthen\\tretry\\u001b, own text "Total"',
+    expect(renderStepLines({ ...step, depth: 1 }, 100, "f").slice(0, 2)).toEqual([
+      '  ✗ 100   assert text "Total"',
+      '          expected: "$12.00"',
     ]);
-    // Still one line each, and still no raw escape sequence in the terminal.
-    for (const line of lines) expect(line).not.toMatch(/\p{Cc}/u);
-    const snapshot: StepReport = {
-      ...text,
-      kind: "snapshot",
-      expected: "\u2264\n0.5%",
-      actual: "3\t10%",
-    };
-    expect(renderStepDetailLines(snapshot, 1).slice(0, 2)).toEqual([
-      "       expected: \u2264\\n0.5%",
-      "       actual:   3\\t10%",
-    ]);
-  });
-
-  it("renderStepDetailLines prints a hint's quoted device text with the actual line's spelling", () => {
-    // The tool-server quotes the own text as JSON. Escaping the hint again
-    // doubled its backslashes and left its quotes raw: neither spelling.
-    const step: StepReport = {
-      index: 0,
-      kind: "assert",
-      status: "fail",
-      actual: 'Say "hi" C:\\x Hello there',
-      hint: 'the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text',
-    };
-    expect(renderStepDetailLines(step, 1)).toEqual([
-      '       actual:   "Say \\"hi\\" C:\\\\x Hello there"',
-      '       hint: the element\'s own text is "Say \\"hi\\" C:\\\\x"; the check accepts the subtree text or the own text',
-    ]);
-  });
-
-  it("renderStepDetailLines prints a pattern in slash delimiters, backslashes intact", () => {
-    // The step line one row above prints the same pattern as /^Taps: \d\d\d$/.
-    // JSON quoting doubled every backslash here, so the printed pattern matched
-    // a literal backslash followed by `d` when it was copied back into the YAML.
-    const step: StepReport = {
-      index: 0,
-      kind: "assert",
-      status: "fail",
-      expected: "^Taps: \\d\\d\\d$",
-      expectedKind: "pattern",
-      actual: "Taps: 0",
-    };
-    expect(renderStepDetailLines(step, 3)).toEqual([
-      "       expected: /^Taps: \\d\\d\\d$/",
-      '       actual:   "Taps: 0"',
-    ]);
-    // A literal keeps the JSON quoting the step line uses for one.
-    expect(renderStepDetailLines({ ...step, expectedKind: undefined }, 3)[0]).toBe(
-      '       expected: "^Taps: \\\\d\\\\d\\\\d$"'
-    );
-    // A control character in a pattern still cannot break the line.
-    expect(renderStepDetailLines({ ...step, expected: "^a\nb$" }, 3)[0]).toBe(
-      "       expected: /^a\\nb$/"
-    );
-  });
-
-  it("renderStepDetailLines keeps a whitespace-only difference visible", () => {
-    // The found text differs from the wanted one only by a line break. These
-    // two lines are the only place a reader of the CLI output sees it.
-    const step: StepReport = {
-      index: 0,
-      kind: "assert",
-      status: "fail",
-      expected: "Ship to: Jane Doe",
-      actual: "Ship to:\nJane Doe",
-    };
-    const lines = renderStepDetailLines(step, 3);
-    expect(lines).toEqual([
-      '       expected: "Ship to: Jane Doe"',
-      '       actual:   "Ship to:\\nJane Doe"',
-    ]);
-    expect(lines[0]!.replace("expected: ", "")).not.toBe(lines[1]!.replace("actual:   ", ""));
-  });
-
-  it("renderStepDetailLines escapes the invisible characters JSON quoting keeps raw", () => {
-    // Each of these prints as nothing or as a plain space, so without an escape
-    // the actual line reads as a twin of the expected one.
-    const step: StepReport = {
-      index: 0,
-      kind: "assert",
-      status: "fail",
-      expected: "10:30 AM Pay now",
-      actual: "10:30\u202fAM Pay\u200bnow\u00a0\u007f\u0085\u2066x\u2069\u2028",
-      hint: 'own text is "Ship\u00a0to"',
-    };
-    const lines = renderStepDetailLines(step, 1);
-    expect(lines).toEqual([
-      '       expected: "10:30 AM Pay now"',
-      '       actual:   "10:30\\u202fAM Pay\\u200bnow\\u00a0\\u007f\\u0085\\u2066x\\u2069\\u2028"',
-      '       hint: own text is "Ship\\u00a0to"',
-    ]);
-    for (const line of lines) expect(line).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u00a0\u202f]/u);
-    // A snapshot value and a pattern get the same escapes.
-    expect(
-      renderStepDetailLines(
-        {
-          ...step,
-          kind: "snapshot",
-          expected: "\u2264\u00a00.5%",
-          actual: undefined,
-          hint: undefined,
-        },
-        1
-      )
-    ).toEqual(["       expected: \u2264\\u00a00.5%"]);
-    expect(
-      renderStepDetailLines(
-        {
-          ...step,
-          expected: "^a\u200bb$",
-          expectedKind: "pattern",
-          actual: undefined,
-          hint: undefined,
-        },
-        1
-      )
-    ).toEqual(["       expected: /^a\\u200bb$/"]);
-  });
-
-  it("renderStepDetailLines marks a step whose check did not run, above its hint", () => {
-    const step: StepReport = {
-      index: 0,
-      kind: "await",
-      status: "fail",
-      reason: "could not read the UI tree: CDP went away",
-      indeterminate: true,
-      hint: "check the app first",
-    };
-    expect(renderStepDetailLines(step, 1)).toEqual([
-      "       indeterminate: the check did not run",
-      "       hint: check the app first",
-    ]);
-    // Only the literal `true` the tool-server sends counts.
-    const hostile = { ...step, indeterminate: "yes", hint: undefined } as unknown as StepReport;
-    expect(renderStepDetailLines(hostile, 1)).toEqual([]);
-  });
-
-  it("renderStepDetailLines cuts a long actual at 300 characters and counts the rest outside the quotes", () => {
-    // 299 characters, an emoji (two UTF-16 units, one character), then more.
-    const text = "a".repeat(299) + "😀" + "b".repeat(1300);
-    const step: StepReport = { index: 0, kind: "assert", status: "fail", actual: text };
-    expect(renderStepDetailLines(step, 1)).toEqual([
-      `       actual:   "${"a".repeat(299)}😀" … (1,300 more characters)`,
-    ]);
-    // A text at the limit prints whole.
-    expect(renderStepDetailLines({ ...step, actual: "c".repeat(300) }, 1)).toEqual([
-      `       actual:   "${"c".repeat(300)}"`,
-    ]);
-  });
-
-  it("renderStepDetailLines prints only the fields a step carries", () => {
-    expect(
-      renderStepDetailLines({ index: 0, kind: "tap", status: "fail", reason: "no match" }, 1)
-    ).toEqual([]);
-    expect(
-      renderStepDetailLines({ index: 0, kind: "tap", status: "fail", hint: "scroll first" }, 1)
-    ).toEqual(["       hint: scroll first"]);
-    expect(
-      renderStepDetailLines({ index: 0, kind: "assert", status: "fail", actual: "Pending" }, 1)
-    ).toEqual(['       actual:   "Pending"']);
-    const hostile = {
-      index: 0,
-      kind: "assert",
-      status: "fail",
-      expected: 12,
-      actual: null,
-      hint: { text: "x" },
-    } as unknown as StepReport;
-    expect(renderStepDetailLines(hostile, 1)).toEqual([]);
   });
 
   it("buffered report prints detail lines under the step and its warning, before its artifacts", () => {

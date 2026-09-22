@@ -63,6 +63,7 @@ import {
   probeWhenCondition,
   type ActionEnv,
   type DirectiveOutcome,
+  type StepDetails,
 } from "./flow-actions";
 import {
   buildAppStateMessage,
@@ -179,7 +180,7 @@ const fileInputs: FileInputSpec[] = [
 
 export type StepStatus = "pass" | "fail" | "skip" | "error";
 
-export interface StepReport {
+export interface StepReport extends StepDetails {
   index: number;
   kind: FlowStep["kind"];
   status: StepStatus;
@@ -202,15 +203,6 @@ export interface StepReport {
    * from one that waited.
    */
   warning?: string;
-  /**
-   * What to try first about a step that did not pass, or a fact that helps
-   * choose the fix (for example the element's own text).
-   */
-  hint?: string;
-  expected?: string;
-  actual?: string;
-  /** `expected` holds a regex source: renderers print it in slash delimiters. */
-  expectedKind?: "pattern";
   indeterminate?: true;
   /** Underlying tool id for `tool` steps. */
   tool?: string;
@@ -2372,11 +2364,8 @@ const INDETERMINATE_HINT =
   "before you edit the flow";
 
 function outcomeDetails(
-  r: Pick<
-    DirectiveOutcome,
-    "indeterminate" | "refused" | "hint" | "expected" | "actual" | "expectedKind"
-  >
-): Pick<StepReport, "hint" | "expected" | "actual" | "expectedKind" | "indeterminate"> {
+  r: StepDetails & Pick<DirectiveOutcome, "indeterminate" | "refused">
+): StepDetails & Pick<StepReport, "indeterminate"> {
   // A refused read gets neither the flag nor the re-run hint: a re-run gets the
   // same refusal, and its reason already says what to change.
   const indeterminate = r.indeterminate === true && r.refused !== true;
