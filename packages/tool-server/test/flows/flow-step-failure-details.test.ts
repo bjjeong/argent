@@ -197,10 +197,8 @@ describe("selector misses on a screen that was never read", () => {
 
     if (miss === "aborted" || !("unresolved" in miss)) throw new Error("expected a miss");
     expect(Date.now()).toBeGreaterThan(blindFrom);
-    expect(selectorMiss(miss)).toEqual({
-      reason: 'no element matched selector id="price-card"',
-      hint: "if it is off-screen, add a scroll-to step before this one",
-    });
+    // No scroll-to advice: Vega refuses scroll-to, as it does in the zero-area hint.
+    expect(selectorMiss(miss)).toEqual({ reason: 'no element matched selector id="price-card"' });
   }, 20_000);
 
   it("still reports a genuinely empty screen as one, with the scroll-to hint", async () => {

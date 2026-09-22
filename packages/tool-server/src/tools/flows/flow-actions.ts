@@ -918,7 +918,8 @@ function noMatchReason(sel: string): string {
 // failure to the scroll search's worst case.
 // A zero-area match gets a wider hint: a tree source can keep an
 // off-screen node at zero area, and the same frame also means an element that
-// is hidden or not laid out.
+// is hidden or not laid out. On a device that refuses scroll-to (Vega), neither
+// hint suggests one.
 //
 // A blind read gets neither: "no element matched" is a claim about what the
 // screen HOLDS, and a read the reader flagged as blind supports no such claim —
@@ -940,17 +941,18 @@ export function selectorMiss({
       ...(blind.hint !== undefined && { hint: blind.hint }),
     };
   }
+  const scrollTo = noScrollTo ? undefined : "add a scroll-to step before this one";
   if (matched === 0) {
     return {
       reason: noMatchReason(sel),
-      hint: "if it is off-screen, add a scroll-to step before this one",
+      ...(scrollTo !== undefined && { hint: `if it is off-screen, ${scrollTo}` }),
     };
   }
   return {
     reason: `${matched} element${matched === 1 ? "" : "s"} matched ${sel} but none was visible (zero-area frame)`,
     hint:
       "the element is in the tree but has no on-screen area; it may be off-screen" +
-      (noScrollTo ? "" : " (add a scroll-to step before this one)") +
+      (scrollTo === undefined ? "" : ` (${scrollTo})`) +
       ", collapsed, or not laid out yet",
   };
 }
