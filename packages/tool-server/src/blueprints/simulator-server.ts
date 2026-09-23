@@ -56,6 +56,31 @@ const getPaths = () => {
 
 const READY_TIMEOUT_MS = 30_000;
 
+// `exit` can fire before the child's stderr is drained, and the last stderr
+// line is usually the reason it exited. Wait this long for the stream to end.
+const STDERR_DRAIN_MS = 250;
+const STDERR_TAIL_LINES = 10;
+const STDERR_MAX_LINE_CHARS = 500;
+
+// env_logger's routine lines ("[<ts> INFO  simulator_server::…] …") say nothing
+// about why the binary stopped; its errors are printed without that prefix.
+const ROUTINE_LOG_LINE = /^\[\S+\s+(?:INFO|DEBUG|TRACE)\s/;
+
+function exitedBeforeReadyMessage(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderrTail: readonly string[]
+): string {
+  const how =
+    typeof code === "number"
+      ? `exited with code ${code}`
+      : signal
+        ? `was killed by ${signal}`
+        : "exited";
+  const reason = stderrTail.filter((line) => !ROUTINE_LOG_LINE.test(line)).join("\n");
+  return `simulator-server ${how} before becoming ready${reason ? `:\n${reason}` : ""}`;
+}
+
 export interface SimulatorServerApi {
   apiUrl: string;
   streamUrl: string;
@@ -289,31 +314,54 @@ async function spawnSimulatorServerProcess(
     });
 
     const udidTag = typeof udid === "string" && udid.length > 0 ? udid.slice(0, 8) : "?";
+    // The binary explains a failed start on stderr (e.g. "Error: Failed to find
+    // any running emulator"), so keep the last lines for the rejection below.
+    const stderrTail: string[] = [];
+    let partialLine = "";
+    const keepLine = (line: string) => {
+      if (line.trim()) stderrTail.push(line.trimEnd().slice(0, STDERR_MAX_LINE_CHARS));
+      stderrTail.splice(0, Math.max(0, stderrTail.length - STDERR_TAIL_LINES));
+    };
     proc.stderr?.on("data", (data: Buffer) => {
       process.stderr.write(`[sim ${udidTag}] ${data}`);
+      if (settled) return;
+      const lines = (partialLine + data.toString()).split("\n");
+      partialLine = (lines.pop() ?? "").slice(-STDERR_MAX_LINE_CHARS);
+      lines.forEach(keepLine);
     });
 
     proc.on("exit", (code, signal) => {
-      settle(() =>
-        reject(
-          new FailureError("simulator-server exited with code before becoming ready", {
-            error_code: FAILURE_CODES.SIMULATOR_SERVER_READY_EXITED,
-            failure_stage: "simulator_server_spawn_ready",
-            failure_area: "tool_server",
-            error_kind: "subprocess",
-            failure_command: "simulator_server",
-            ...(typeof code === "number" ? { failure_exit_code: code } : {}),
-            ...(signal === "SIGABRT" ||
-            signal === "SIGHUP" ||
-            signal === "SIGINT" ||
-            signal === "SIGKILL" ||
-            signal === "SIGQUIT" ||
-            signal === "SIGTERM"
-              ? { failure_signal: signal }
-              : {}),
-          })
-        )
-      );
+      const fail = () => {
+        keepLine(partialLine);
+        partialLine = "";
+        settle(() =>
+          reject(
+            new FailureError(exitedBeforeReadyMessage(code, signal, stderrTail), {
+              error_code: FAILURE_CODES.SIMULATOR_SERVER_READY_EXITED,
+              failure_stage: "simulator_server_spawn_ready",
+              failure_area: "tool_server",
+              error_kind: "subprocess",
+              failure_command: "simulator_server",
+              ...(typeof code === "number" ? { failure_exit_code: code } : {}),
+              ...(signal === "SIGABRT" ||
+              signal === "SIGHUP" ||
+              signal === "SIGINT" ||
+              signal === "SIGKILL" ||
+              signal === "SIGQUIT" ||
+              signal === "SIGTERM"
+                ? { failure_signal: signal }
+                : {}),
+            })
+          )
+        );
+      };
+      const stderr = proc.stderr;
+      if (settled || !stderr || stderr.readableEnded) return fail();
+      const drainTimer = setTimeout(fail, STDERR_DRAIN_MS);
+      stderr.once("end", () => {
+        clearTimeout(drainTimer);
+        fail();
+      });
     });
 
     proc.on("error", (err) => {
