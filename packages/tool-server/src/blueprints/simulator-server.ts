@@ -77,7 +77,7 @@ function exitedBeforeReadyMessage(
       : signal
         ? `was killed by ${signal}`
         : "exited";
-  const reason = stderrTail.filter((line) => !ROUTINE_LOG_LINE.test(line)).join("\n");
+  const reason = stderrTail.join("\n");
   return `simulator-server ${how} before becoming ready${reason ? `:\n${reason}` : ""}`;
 }
 
@@ -288,8 +288,12 @@ async function spawnSimulatorServerProcess(
       fn();
     };
 
+    // Set on `exit`, before the rejection waits for stderr: stdout can still
+    // deliver buffered readiness lines, and an exited process is never ready.
+    let exited = false;
+
     const resolveWhenReady = () => {
-      if (apiUrl == null) return;
+      if (apiUrl == null || exited) return;
       settle(() => resolve({ proc, apiUrl: apiUrl!, streamUrl }));
     };
 
@@ -318,8 +322,11 @@ async function spawnSimulatorServerProcess(
     // any running emulator"), so keep the last lines for the rejection below.
     const stderrTail: string[] = [];
     let partialLine = "";
+    // Routine lines are dropped here, not when the message is built, so a burst
+    // of shutdown logging cannot push the error out of the tail.
     const keepLine = (line: string) => {
-      if (line.trim()) stderrTail.push(line.trimEnd().slice(0, STDERR_MAX_LINE_CHARS));
+      if (!line.trim() || ROUTINE_LOG_LINE.test(line)) return;
+      stderrTail.push(line.trimEnd().slice(0, STDERR_MAX_LINE_CHARS));
       stderrTail.splice(0, Math.max(0, stderrTail.length - STDERR_TAIL_LINES));
     };
     proc.stderr?.on("data", (data: Buffer) => {
@@ -331,6 +338,7 @@ async function spawnSimulatorServerProcess(
     });
 
     proc.on("exit", (code, signal) => {
+      exited = true;
       const fail = () => {
         keepLine(partialLine);
         partialLine = "";

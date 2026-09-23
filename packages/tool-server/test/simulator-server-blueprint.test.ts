@@ -318,6 +318,54 @@ describe("simulatorServerBlueprint.factory — receives a pre-resolved DeviceInf
 
     const error = (await factoryPromise.catch((e: unknown) => e)) as Error;
     expect(error.message).toBe("simulator-server was killed by SIGKILL before becoming ready");
+    expect(getFailureSignal(error)).toMatchObject({
+      error_code: "SIMULATOR_SERVER_READY_EXITED",
+      failure_signal: "SIGKILL",
+    });
+  });
+
+  it("keeps the binary's error when routine shutdown lines follow it", async () => {
+    const fakeProc = makeFakeProc();
+    spawnMock.mockReturnValue(fakeProc);
+    const { simulatorServerBlueprint } = await import("../src/blueprints/simulator-server");
+
+    const device = androidDevice("emulator-5554");
+    const factoryPromise = simulatorServerBlueprint.factory({}, device, { device });
+    setImmediate(() => {
+      fakeProc.stderr.push("Error: Failed to find any running emulator\n");
+      for (let i = 0; i < 12; i++) {
+        fakeProc.stderr.push(
+          `[2026-09-23T16:23:35Z INFO  simulator_server::media_handler] shutdown step ${i}\n`
+        );
+      }
+      fakeProc.stderr.push(null);
+      fakeProc.emit("exit", 1, null);
+    });
+
+    const error = (await factoryPromise.catch((e: unknown) => e)) as Error;
+    expect(error.message).toContain("Error: Failed to find any running emulator");
+    expect(error.message).not.toContain("shutdown step");
+  });
+
+  // Stdio can outlive `exit`, so readiness lines may still be buffered while the
+  // rejection waits for stderr. A process that already exited is never ready.
+  it("never resolves readiness after the process has exited", async () => {
+    const fakeProc = makeFakeProc();
+    spawnMock.mockReturnValue(fakeProc);
+    const { simulatorServerBlueprint } = await import("../src/blueprints/simulator-server");
+
+    const device = androidDevice("emulator-5554");
+    const factoryPromise = simulatorServerBlueprint.factory({}, device, { device });
+    setImmediate(() => {
+      fakeProc.emit("exit", 1, null);
+      fakeProc.stdout.push("stream_ready http://127.0.0.1:55571\n");
+      fakeProc.stdout.push("api_ready http://127.0.0.1:55570\n");
+      setImmediate(() => fakeProc.stderr.push(null));
+    });
+
+    const error = (await factoryPromise.catch((e: unknown) => e)) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/^simulator-server exited with code 1 before becoming ready/);
   });
 
   it("falls back to the STREAM_GRACE_MS resolve when only api_ready arrives (non-streaming build)", async () => {
