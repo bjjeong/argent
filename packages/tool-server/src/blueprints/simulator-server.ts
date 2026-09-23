@@ -339,6 +339,9 @@ async function spawnSimulatorServerProcess(
 
     proc.on("exit", (code, signal) => {
       exited = true;
+      // The ready deadline must not fire during the stderr wait and replace the
+      // exit code and reason with a timeout.
+      clearTimeout(timer);
       const fail = () => {
         keepLine(partialLine);
         partialLine = "";

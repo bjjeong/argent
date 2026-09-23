@@ -368,6 +368,34 @@ describe("simulatorServerBlueprint.factory — receives a pre-resolved DeviceInf
     expect(error.message).toMatch(/^simulator-server exited with code 1 before becoming ready/);
   });
 
+  it("reports the exit, not the ready timeout, when the process exits just before the deadline", async () => {
+    const { simulatorServerBlueprint } = await import("../src/blueprints/simulator-server");
+    vi.useFakeTimers();
+    try {
+      const fakeProc = makeFakeProc();
+      spawnMock.mockReturnValue(fakeProc);
+
+      const device = androidDevice("emulator-5554");
+      const factoryPromise = simulatorServerBlueprint.factory({}, device, { device });
+      const settled = factoryPromise.catch((e: unknown) => e);
+
+      // Exit 100 ms before the 30 s readiness deadline, with stderr still open,
+      // so the deadline falls inside the wait for stderr to drain.
+      await vi.advanceTimersByTimeAsync(29_900);
+      fakeProc.emit("exit", 1, null);
+      await vi.advanceTimersByTimeAsync(300);
+
+      const error = (await settled) as Error;
+      expect(getFailureSignal(error)).toMatchObject({
+        error_code: "SIMULATOR_SERVER_READY_EXITED",
+        failure_exit_code: 1,
+      });
+      expect(fakeProc.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to the STREAM_GRACE_MS resolve when only api_ready arrives (non-streaming build)", async () => {
     // Non-streaming / older simulator-server builds never print `stream_ready`.
     // The blueprint must still resolve, after a bounded grace window, with an
